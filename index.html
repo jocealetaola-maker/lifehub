@@ -5,9 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>LifeHub</title>
 
-<link rel="manifest" href="manifest.json" />
-  
-<!-- PWA / Add to Home Screen (iOS) -->
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="LifeHub" />
@@ -189,7 +186,6 @@
 </header>
 
 <main>
-  <!-- SETUP (shown if no Supabase creds) -->
   <section id="setup" class="setup" style="display:none">
     <div class="card">
       <h2 style="margin-bottom:6px">One-time setup</h2>
@@ -200,19 +196,11 @@
     </div>
   </section>
 
-  <!-- SHOPPING -->
   <section id="tab-shopping" class="tab-panel">
     <div class="panel-head"><h2>Shopping</h2><span class="hint">Tap circle = bought</span></div>
     <div id="shoppingList"></div>
   </section>
 
-  <!-- TODO -->
-  <section id="tab-todos" class="tab-panel">
-    <div class="panel-head"><h2>To-Do</h2><span class="hint">🔔 sends to your iPhone</span></div>
-    <div id="todoList"></div>
-  </section>
-
-  <!-- BUDGET -->
   <section id="tab-budget" class="tab-panel">
     <div class="panel-head"><h2>Budget</h2><span class="hint" id="budgetHint"></span></div>
     <div class="monthnav">
@@ -228,19 +216,16 @@
     <div id="budgetBody"></div>
   </section>
 
-  <!-- VIOS -->
   <section id="tab-vios" class="tab-panel">
     <div class="panel-head"><h2>Vios rental</h2><span class="hint">Separate income</span></div>
     <div id="viosBody"></div>
   </section>
 
-  <!-- LOANS -->
   <section id="tab-loans" class="tab-panel">
     <div class="panel-head"><h2>Long-term payments</h2><span class="hint">Amortization & carryover</span></div>
     <div id="loanBody"></div>
   </section>
 
-  <!-- SETTINGS -->
   <section id="tab-settings" class="tab-panel">
     <div class="panel-head"><h2>Settings</h2></div>
     <div id="settingsBody"></div>
@@ -251,7 +236,6 @@
 
 <nav class="tabs" id="nav">
   <button data-t="shopping" onclick="App.go('shopping')"><span class="ic">🛒</span>Shopping</button>
-  <button data-t="todos" onclick="App.go('todos')"><span class="ic">✓</span>To-Do</button>
   <button data-t="budget" onclick="App.go('budget')"><span class="ic">₱</span>Budget</button>
   <button data-t="vios" onclick="App.go('vios')"><span class="ic">🚗</span>Vios</button>
   <button data-t="loans" onclick="App.go('loans')"><span class="ic">📅</span>Loans</button>
@@ -271,12 +255,11 @@ const App = (() => {
     accent:'#7c6f9c', bg:'#faf7f2', font:'Manrope', currency:'₱',
     payMid:15, payEnd:30, savingsPct:20,
     cat_shopping:['Groceries','House things','Personal care','Pharmacy','Other'],
-    cat_todos:['General','Work','Home','Errands','Health'],
     cat_budget:['Bills','Food','Transport','Subscriptions','Health','Misc']
   };
   let S = {...DEFAULTS};
 
-  const data = { shopping:[], todos:[], incomes:[], expenses:[], recurring:[], vios:[], loans:[], payments:[], periods:[] };
+  const data = { shopping:[], incomes:[], expenses:[], recurring:[], vios:[], loans:[], payments:[], periods:[] };
 
   /* ---------- helpers ---------- */
   const $ = s => document.querySelector(s);
@@ -307,8 +290,8 @@ const App = (() => {
     document.head.appendChild(l);
   }
 
-  /* ---------- ICS reminder ---------- */
- function downloadICS(title, dateStr, timeStr, notes){
+  /* ---------- download ICS Helper (Used for Loan Reminders) ---------- */
+  function downloadICS(title, dateStr, timeStr, notes){
     if(!dateStr){ toast('Add a due date first'); return; }
     const dt = new Date(`${dateStr}T${timeStr||'09:00'}:00`);
     const stamp = d => d.toISOString().replace(/[-:]/g,'').slice(0,15)+'Z';
@@ -324,7 +307,7 @@ const App = (() => {
     const dataUri = 'data:text/calendar;charset=utf-8,' + encodeURIComponent(ics);
     const isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
     if(isiOS){
-      window.location.href = dataUri;   // iOS opens the Add-to-Calendar sheet
+      window.location.href = dataUri;
     } else {
       const a=document.createElement('a'); a.href=dataUri;
       a.download=(title||'reminder').replace(/[^a-z0-9]/gi,'_').slice(0,30)+'.ics';
@@ -358,13 +341,13 @@ const App = (() => {
 
       const grab = async (t,order)=>{ const {data:d,error}=await sb.from(t).select('*').order(order||'created_at'); if(error)throw error; return d||[]; };
       data.shopping = await grab('shopping_items','created_at');
-      data.todos    = await grab('todos','created_at');
       data.incomes  = await grab('budget_incomes','created_at');
       data.expenses = await grab('budget_expenses','created_at');
       data.recurring= await grab('recurring_expenses','created_at');
       data.vios     = await grab('vios_entries','date');
       data.loans    = await grab('loans','created_at');
       data.payments = await grab('loan_payments','month');
+      data.periods  = await grab('loan_periods','month');
 
       await autoLogRecurring();
       $('#syncState').textContent='Synced ✓';
@@ -415,7 +398,7 @@ const App = (() => {
   /* ================= RENDERERS ================= */
   function renderAll(){ render(tab); }
   function render(t){
-    ({shopping:renderShopping, todos:renderTodos, budget:renderBudget,
+    ({shopping:renderShopping, budget:renderBudget,
       vios:renderVios, loans:renderLoans, settings:renderSettings}[t]||(()=>{}))();
   }
 
@@ -457,71 +440,12 @@ const App = (() => {
     closeSheet(); renderShopping();
   }
 
-  /* ----- Todos ----- */
-  function renderTodos(){
-    const wrap=$('#todoList');
-    const open=data.todos.filter(t=>!t.completed), done=data.todos.filter(t=>t.completed);
-    if(!data.todos.length){ wrap.innerHTML=emptyState('All clear','Tap + to add a task — set a due date to send it to your iPhone'); return; }
-    let html='';
-    const byCat={}; open.forEach(t=>{(byCat[t.category]=byCat[t.category]||[]).push(t);});
-    Object.keys(byCat).sort().forEach(cat=>{
-      html+=`<div class="group-title">${esc(cat)} <span class="count">${byCat[cat].length}</span></div><div class="card">`;
-      byCat[cat].sort(sortDue).forEach(t=>html+=todoRow(t));
-      html+='</div>';
-    });
-    if(done.length){
-      html+=`<div class="group-title">Done <span class="count">${done.length}</span></div><div class="card">`;
-      done.forEach(t=>html+=todoRow(t)); html+='</div>';
-    }
-    wrap.innerHTML=html;
-  }
-  function sortDue(a,b){ return (a.due_date||'9999')+(a.due_time||'')<(b.due_date||'9999')+(b.due_time||'')?-1:1; }
-  function todoRow(t){
-    let due='';
-    if(t.due_date){
-      const overdue = !t.completed && (t.due_date < todayStr());
-      const today = t.due_date===todayStr();
-      const lbl = new Date(t.due_date+'T00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'})+(t.due_time?(' · '+t.due_time):'');
-      due=`<span class="pill ${overdue?'bad':today?'warn':'gray'}" style="margin-top:3px;display:inline-block">${overdue?'Overdue · ':''}${lbl}</span>`;
-    }
-    const pr = t.priority==='high'?'<span class="pill bad" style="margin-left:5px">High</span>':'';
-    return `<div class="item ${t.completed?'done':''}">
-      <button class="check ${t.completed?'on':''}" onclick="App.toggleTodo('${t.id}')">${t.completed?'✓':''}</button>
-      <div class="body"><div class="title">${esc(t.title)}${pr}</div>
-        ${t.notes?`<div class="meta">${esc(t.notes)}</div>`:''}${due}</div>
-      <div class="acts">
-        ${t.due_date&&!t.completed?`<button class="icon-btn" title="Send to iPhone" onclick="App.remindTodo('${t.id}')">🔔</button>`:''}
-        <button class="icon-btn del" onclick="App.delTodo('${t.id}')">✕</button></div>
-    </div>`;
-  }
-  async function toggleTodo(id){ const t=data.todos.find(x=>x.id===id); await upd('todos',id,{completed:!t.completed},data.todos); renderTodos(); }
-  async function delTodo(id){ await del('todos',id,data.todos); renderTodos(); }
-  function remindTodo(id){ const t=data.todos.find(x=>x.id===id); downloadICS(t.title,t.due_date,t.due_time,t.notes); }
-  function todoForm(){
-    openSheet(`<h3>New task</h3>
-      <div class="field"><label>Task</label><input id="f_title" placeholder="What needs doing?" /></div>
-      <div class="field"><label>Notes</label><textarea id="f_notes" placeholder="optional"></textarea></div>
-      <div class="field two"><div><label>Category</label><select id="f_cat">${catOptions(S.cat_todos,S.cat_todos[0])}</select></div>
-      <div><label>Priority</label><select id="f_pr"><option value="normal">Normal</option><option value="high">High</option></select></div></div>
-      <div class="field two"><div><label>Due date</label><input id="f_date" type="date" /></div>
-      <div><label>Time</label><input id="f_time" type="time" /></div></div>
-      <p class="muted" style="font-size:12px">Tip: add a due date, then tap 🔔 on the task to drop a self-firing reminder into your iPhone's Calendar/Reminders.</p>
-      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.addTodo()">Add task</button></div>`);
-    setTimeout(()=>$('#f_title').focus(),100);
-  }
-  async function addTodo(){
-    const title=$('#f_title').value.trim(); if(!title){toast('Task needed');return;}
-    await ins('todos',{title,notes:$('#f_notes').value.trim(),category:$('#f_cat').value,priority:$('#f_pr').value,
-      due_date:$('#f_date').value||null,due_time:$('#f_time').value||null,completed:false},data.todos);
-    closeSheet(); renderTodos();
-  }
-
   /* ----- Budget ----- */
   function setPeriod(p){ period=p; document.querySelectorAll('#periodSeg button').forEach(b=>b.classList.toggle('on',b.dataset.p===p)); renderBudget(); }
   function shiftMonth(d){ const dt=new Date(month+'-01'); dt.setMonth(dt.getMonth()+d); month=dt.toISOString().slice(0,7); autoLogRecurring().then(renderBudget); }
   function periodsActive(){ return period==='both'?['mid','end']:[period]; }
 
-function renderBudget(){
+  function renderBudget(){
     $('#monthLabel').textContent=monthName(month);
     $('#budgetHint').textContent = 'Pay periods: 15th & 30th';
     const ps=periodsActive();
@@ -654,7 +578,7 @@ function renderBudget(){
     closeSheet(); renderVios();
   }
 
-/* ----- Loans (revolving balance, by pay period) ----- */
+  /* ----- Loans (revolving balance, by pay period) ----- */
   const PERIOD_LABEL = p => p==='mid' ? '15th' : '30th';
   const monthShort = ym => { const [y,m]=ym.split('-'); return new Date(y,m-1,1).toLocaleString(undefined,{month:'short',year:'2-digit'}); };
   const fmtDay = d => d ? new Date(d+'T00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'}) : '—';
@@ -822,7 +746,6 @@ function renderBudget(){
       <div><label>End-month pay day</label><input type="number" value="${S.payEnd}" onchange="App.setOpt('payEnd',+this.value)" /></div></div></div>`;
 
     html+=catEditor('Shopping categories','cat_shopping');
-    html+=catEditor('To-Do categories','cat_todos');
     html+=catEditor('Budget categories','cat_budget');
 
     html+=`<div class="card"><h3 style="font-size:15px;margin-bottom:6px">Recurring expense templates</h3>
@@ -836,12 +759,6 @@ function renderBudget(){
     html+=`<div class="card"><h3 style="font-size:15px;margin-bottom:8px">Add to Home Screen</h3>
       <p class="muted" style="font-size:13px">In Safari: tap <b>Share</b> → <b>Add to Home Screen</b>. LifeHub then opens full-screen like an app.</p></div>`;
 
-    html+=`<div class="card">
-  <h3 style="font-size:15px;margin-bottom:6px">System Alerts</h3>
-  <p class="muted" style="font-size:13px;margin-bottom:10px">Enable direct, automated banner notifications on this iPhone.</p>
-  <button class="btn" style="width:100%;justify-content:center" onclick="App.initPushNotifications()">Enable Notifications</button>
-</div>`;
-    
     html+=`<div class="card"><button class="btn line" style="width:100%;justify-content:center" onclick="App.resetCreds()">Disconnect this device</button></div>`;
     $('#settingsBody').innerHTML=html;
   }
@@ -863,57 +780,17 @@ function renderBudget(){
   function emptyState(b,p){ return `<div class="empty"><b>${b}</b>${p}</div>`; }
 
   /* ----- FAB router ----- */
-  function fab(){ ({shopping:shopForm,todos:todoForm,budget:expenseForm,vios:viosForm,loans:loanForm}[tab]||(()=>{}))(); }
+  function fab(){ ({shopping:shopForm,budget:expenseForm,vios:viosForm,loans:loanForm}[tab]||(()=>{}))(); }
 
-  /* ----- Push Notifications Setup ----- */
-  async function initPushNotifications() {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-      toast('Push messaging is not supported on this browser/device.');
-      return;
-    }
-
-    try {
-      // 1. Register the background sw.js file you created
-      const registration = await navigator.serviceWorker.register('sw.js');
-      
-      // 2. Ask iOS for native banner permission
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') {
-        toast('Notification permission denied.');
-        return;
-      }
-
-      // 3. Request a unique notification token from Apple
-      // NOTE: You will eventually replace 'YOUR_PUBLIC_VAPID_KEY' in Step 4
-      const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: 'BHJprwF9QhHohdBMtf9u8_idJw46Koz5Tj5fnJVXY-1DI2HmHTlCuV_qdSkTzbZSEMsP4zejWfh0R8wKtrINfkM' 
-      });
-
-      // 4. Save this device address straight into your new Supabase table
-      await sb.from('user_device_tokens').insert({
-        device_subscription_json: JSON.stringify(subscription)
-      });
-
-      toast('Notifications linked successfully! 🎉');
-    } catch (e) {
-      console.error(e);
-      toast('Failed to setup notifications.');
-    }
-  }
-  
   /* ----- init ----- */
   function init(){
     if(!connect())return;
     go('shopping');
     loadAll();
-    initPushNotifications(); // <-- Add this line right here
   }
 
   return { init, go, fab, saveCreds, closeSheet,
-          initPushNotifications, // <-- Add this line here too
     toggleShop, delShop, shopForm, addShop,
-    toggleTodo, delTodo, remindTodo, todoForm, addTodo,
     setPeriod, shiftMonth, renderBudget, incomeForm, saveIncome, delInc,
     expenseForm, addExp, toggleExp, delExp,
     viosForm, addVios, delVios,
