@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>LifeHub</title>
+
+<!-- PWA / Add to Home Screen (iOS) -->
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="LifeHub" />
+<meta name="theme-color" content="#7c6f9c" />
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%237c6f9c'/%3E%3Ctext x='50' y='66' font-size='52' text-anchor='middle' fill='white' font-family='sans-serif'%3EL%3C/text%3E%3C/svg%3E" />
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+  :root{
+    --accent:#7c6f9c;
+    --accent-soft:#efeaf6;
+    --bg:#faf7f2;
+    --card:#ffffff;
+    --ink:#2c2a33;
+    --muted:#8a8694;
+    --line:#ece8f0;
+    --good:#3f9d6d;
+    --warn:#d98324;
+    --bad:#c4544f;
+    --radius:16px;
+    --font:'Manrope', system-ui, -apple-system, sans-serif;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:var(--font);
+    background:var(--bg);
+    color:var(--ink);
+    font-size:15px;
+    line-height:1.45;
+    padding-bottom:calc(76px + env(safe-area-inset-bottom));
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3{margin:0;font-weight:700}
+  button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit;font-size:inherit}
+  input,select,textarea{font-family:inherit;font-size:15px}
+
+  /* Top bar */
+  header.app{
+    position:sticky;top:0;z-index:30;
+    background:color-mix(in srgb, var(--bg) 86%, transparent);
+    backdrop-filter:blur(10px);
+    padding:calc(12px + env(safe-area-inset-top)) 18px 12px;
+    border-bottom:1px solid var(--line);
+    display:flex;align-items:baseline;justify-content:space-between;gap:10px;
+  }
+  header.app .brand{font-size:20px;font-weight:800;letter-spacing:-.4px}
+  header.app .brand span{color:var(--accent)}
+  header.app .sub{font-size:12px;color:var(--muted)}
+
+  main{max-width:760px;margin:0 auto;padding:16px 14px 30px}
+  .tab-panel{display:none;animation:fade .25s ease}
+  .tab-panel.active{display:block}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  .panel-head{display:flex;align-items:center;justify-content:space-between;margin:4px 2px 14px}
+  .panel-head h2{font-size:22px;letter-spacing:-.5px}
+  .panel-head .hint{font-size:12px;color:var(--muted)}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px}
+  .card + .card{margin-top:12px}
+
+  .btn{background:var(--accent);color:#fff;padding:9px 14px;border-radius:11px;font-weight:600;display:inline-flex;align-items:center;gap:6px;font-size:14px}
+  .btn:active{transform:scale(.97)}
+  .btn.ghost{background:var(--accent-soft);color:var(--accent)}
+  .btn.tiny{padding:5px 9px;font-size:12px;border-radius:8px}
+  .btn.line{background:transparent;border:1px solid var(--line);color:var(--ink)}
+
+  .row{display:flex;align-items:center;gap:10px}
+  .spacer{flex:1}
+  .pill{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;background:var(--accent-soft);color:var(--accent)}
+  .pill.gray{background:var(--line);color:var(--muted)}
+  .pill.good{background:#e7f4ee;color:var(--good)}
+  .pill.warn{background:#fbf0e1;color:var(--warn)}
+  .pill.bad{background:#fae9e8;color:var(--bad)}
+
+  .muted{color:var(--muted)}
+  .empty{text-align:center;color:var(--muted);padding:30px 10px;font-size:14px}
+  .empty b{display:block;color:var(--ink);font-size:15px;margin-bottom:4px}
+
+  /* list items */
+  .item{display:flex;align-items:center;gap:11px;padding:11px 4px;border-bottom:1px solid var(--line)}
+  .item:last-child{border-bottom:none}
+  .item .check{width:22px;height:22px;border-radius:7px;border:2px solid var(--line);flex:none;display:grid;place-items:center;font-size:13px;color:#fff}
+  .item .check.on{background:var(--good);border-color:var(--good)}
+  .item .body{flex:1;min-width:0}
+  .item .title{font-weight:600}
+  .item .meta{font-size:12px;color:var(--muted)}
+  .item.done .title{text-decoration:line-through;color:var(--muted)}
+  .item .acts{display:flex;gap:6px;flex:none}
+  .icon-btn{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent);font-size:15px}
+  .icon-btn.del{background:#fae9e8;color:var(--bad)}
+
+  .group-title{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:18px 2px 8px;display:flex;align-items:center;gap:8px}
+  .group-title .count{background:var(--line);color:var(--muted);border-radius:999px;padding:1px 8px;font-size:11px}
+
+  /* budget columns */
+  .cols{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+  .colcard{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:12px}
+  .colcard h4{font-size:13px;font-weight:800;margin-bottom:8px;display:flex;justify-content:space-between}
+  .colcard h4 .sum{color:var(--accent)}
+  .exp{display:flex;align-items:center;gap:8px;padding:7px 2px;border-bottom:1px dashed var(--line);font-size:14px}
+  .exp:last-child{border-bottom:none}
+  .exp .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .exp .amt{font-weight:700;font-variant-numeric:tabular-nums}
+
+  .summary{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+  .stat{background:var(--accent-soft);border-radius:13px;padding:12px}
+  .stat .k{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--accent)}
+  .stat .v{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.5px;margin-top:2px}
+  .stat.big{grid-column:1/-1}
+  .stat.good .v{color:var(--good)} .stat.bad .v{color:var(--bad)}
+
+  .monthnav{display:flex;align-items:center;justify-content:center;gap:14px;margin-bottom:12px}
+  .monthnav .m{font-weight:800;font-size:16px;min-width:130px;text-align:center}
+  .monthnav button{width:36px;height:36px;border-radius:10px;background:var(--accent-soft);color:var(--accent);font-size:18px}
+
+  .seg{display:flex;background:var(--accent-soft);border-radius:11px;padding:3px;gap:3px;margin-bottom:12px}
+  .seg button{flex:1;padding:7px;border-radius:8px;font-weight:700;font-size:13px;color:var(--accent)}
+  .seg button.on{background:var(--card);box-shadow:0 1px 3px rgba(0,0,0,.06)}
+
+  table.pay{width:100%;border-collapse:collapse;font-size:13px}
+  table.pay th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);padding:6px 6px;border-bottom:1px solid var(--line)}
+  table.pay td{padding:9px 6px;border-bottom:1px solid var(--line);vertical-align:middle}
+  table.pay td.num{text-align:right;font-variant-numeric:tabular-nums}
+
+  /* bottom nav */
+  nav.tabs{
+    position:fixed;left:0;right:0;bottom:0;z-index:40;
+    background:color-mix(in srgb, var(--card) 92%, transparent);
+    backdrop-filter:blur(12px);
+    border-top:1px solid var(--line);
+    display:flex;justify-content:space-around;
+    padding:7px 4px calc(7px + env(safe-area-inset-bottom));
+  }
+  nav.tabs button{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;color:var(--muted);font-size:10px;font-weight:600;padding:4px 0}
+  nav.tabs button .ic{font-size:20px;line-height:1}
+  nav.tabs button.on{color:var(--accent)}
+
+  /* modal */
+  .scrim{position:fixed;inset:0;background:rgba(20,18,28,.42);z-index:60;display:none;align-items:flex-end;justify-content:center}
+  .scrim.show{display:flex}
+  .sheet{background:var(--card);width:100%;max-width:520px;border-radius:20px 20px 0 0;padding:18px 18px calc(20px + env(safe-area-inset-bottom));max-height:90vh;overflow:auto;animation:up .25s ease}
+  @media(min-width:560px){.scrim{align-items:center}.sheet{border-radius:20px;margin:20px}}
+  @keyframes up{from{transform:translateY(40px);opacity:.6}to{transform:none;opacity:1}}
+  .sheet h3{font-size:18px;margin-bottom:14px}
+  .field{margin-bottom:12px}
+  .field label{display:block;font-size:12px;font-weight:700;color:var(--muted);margin-bottom:5px}
+  .field input,.field select,.field textarea{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:11px;background:var(--bg);color:var(--ink)}
+  .field textarea{min-height:64px;resize:vertical}
+  .field.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .field.two > div{display:flex;flex-direction:column}
+  .sheet-acts{display:flex;gap:10px;margin-top:16px}
+  .sheet-acts .btn{flex:1;justify-content:center;padding:12px}
+
+  .chips{display:flex;flex-wrap:wrap;gap:7px}
+  .chip{background:var(--accent-soft);color:var(--accent);padding:6px 11px;border-radius:999px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px}
+  .chip button{color:var(--accent);font-weight:800;opacity:.6}
+  .swatch{width:34px;height:34px;border-radius:9px;border:2px solid var(--line);padding:0}
+  .swatch.on{border-color:var(--ink)}
+
+  .fab{position:fixed;right:16px;bottom:calc(82px + env(safe-area-inset-bottom));z-index:45;width:54px;height:54px;border-radius:50%;background:var(--accent);color:#fff;font-size:28px;display:grid;place-items:center;box-shadow:0 6px 18px rgba(0,0,0,.18)}
+
+  .toast{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:11px;font-size:13px;z-index:80;opacity:0;pointer-events:none;transition:opacity .2s}
+  .toast.show{opacity:1}
+
+  .setup{max-width:440px;margin:40px auto;padding:0 18px}
+</style>
+</head>
+<body>
+
+<header class="app">
+  <div>
+    <div class="brand">Life<span>Hub</span></div>
+    <div class="sub" id="syncState">Connecting…</div>
+  </div>
+  <button class="btn ghost tiny" onclick="App.go('settings')">⚙︎ Settings</button>
+</header>
+
+<main>
+  <!-- SETUP (shown if no Supabase creds) -->
+  <section id="setup" class="setup" style="display:none">
+    <div class="card">
+      <h2 style="margin-bottom:6px">One-time setup</h2>
+      <p class="muted" style="font-size:13px">Paste your Supabase project URL and anon key. Find them in your Supabase project → Settings → API. Stored only on this device.</p>
+      <div class="field" style="margin-top:14px"><label>Supabase URL</label><input id="setUrl" placeholder="https://xxxx.supabase.co" /></div>
+      <div class="field"><label>Supabase anon key</label><input id="setKey" placeholder="eyJhbGci…" /></div>
+      <button class="btn" style="width:100%;justify-content:center;padding:12px" onclick="App.saveCreds()">Connect</button>
+    </div>
+  </section>
+
+  <!-- SHOPPING -->
+  <section id="tab-shopping" class="tab-panel">
+    <div class="panel-head"><h2>Shopping</h2><span class="hint">Tap circle = bought</span></div>
+    <div id="shoppingList"></div>
+  </section>
+
+  <!-- TODO -->
+  <section id="tab-todos" class="tab-panel">
+    <div class="panel-head"><h2>To-Do</h2><span class="hint">🔔 sends to your iPhone</span></div>
+    <div id="todoList"></div>
+  </section>
+
+  <!-- BUDGET -->
+  <section id="tab-budget" class="tab-panel">
+    <div class="panel-head"><h2>Budget</h2><span class="hint" id="budgetHint"></span></div>
+    <div class="monthnav">
+      <button onclick="App.shiftMonth(-1)">‹</button>
+      <div class="m" id="monthLabel"></div>
+      <button onclick="App.shiftMonth(1)">›</button>
+    </div>
+    <div class="seg" id="periodSeg">
+      <button data-p="mid" class="on" onclick="App.setPeriod('mid')">Mid-month</button>
+      <button data-p="end" onclick="App.setPeriod('end')">End-month</button>
+      <button data-p="both" onclick="App.setPeriod('both')">Both</button>
+    </div>
+    <div id="budgetBody"></div>
+  </section>
+
+  <!-- VIOS -->
+  <section id="tab-vios" class="tab-panel">
+    <div class="panel-head"><h2>Vios rental</h2><span class="hint">Separate income</span></div>
+    <div id="viosBody"></div>
+  </section>
+
+  <!-- LOANS -->
+  <section id="tab-loans" class="tab-panel">
+    <div class="panel-head"><h2>Long-term payments</h2><span class="hint">Amortization & carryover</span></div>
+    <div id="loanBody"></div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section id="tab-settings" class="tab-panel">
+    <div class="panel-head"><h2>Settings</h2></div>
+    <div id="settingsBody"></div>
+  </section>
+</main>
+
+<button class="fab" id="fab" onclick="App.fab()">+</button>
+
+<nav class="tabs" id="nav">
+  <button data-t="shopping" onclick="App.go('shopping')"><span class="ic">🛒</span>Shopping</button>
+  <button data-t="todos" onclick="App.go('todos')"><span class="ic">✓</span>To-Do</button>
+  <button data-t="budget" onclick="App.go('budget')"><span class="ic">₱</span>Budget</button>
+  <button data-t="vios" onclick="App.go('vios')"><span class="ic">🚗</span>Vios</button>
+  <button data-t="loans" onclick="App.go('loans')"><span class="ic">📅</span>Loans</button>
+</nav>
+
+<div class="scrim" id="scrim"><div class="sheet" id="sheet"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const App = (() => {
+  let sb=null, tab='shopping', period='mid';
+  let month = new Date().toISOString().slice(0,7); // YYYY-MM
+  const LS = { url:'lh_url', key:'lh_key' };
+
+  // default settings (stored in app_settings.data)
+  const DEFAULTS = {
+    accent:'#7c6f9c', bg:'#faf7f2', font:'Manrope', currency:'₱',
+    payMid:15, payEnd:30, savingsPct:20,
+    cat_shopping:['Groceries','House things','Personal care','Pharmacy','Other'],
+    cat_todos:['General','Work','Home','Errands','Health'],
+    cat_budget:['Bills','Food','Transport','Subscriptions','Health','Misc']
+  };
+  let S = {...DEFAULTS};
+
+  const data = { shopping:[], todos:[], incomes:[], expenses:[], recurring:[], vios:[], loans:[], payments:[] };
+
+  /* ---------- helpers ---------- */
+  const $ = s => document.querySelector(s);
+  const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const money = n => S.currency + Number(n||0).toLocaleString(undefined,{maximumFractionDigits:2});
+  const todayStr = () => new Date().toISOString().slice(0,10);
+  const monthName = ym => { const [y,m]=ym.split('-'); return new Date(y,m-1,1).toLocaleString(undefined,{month:'long',year:'numeric'}); };
+  function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),2200); }
+
+  function applyTheme(){
+    const r=document.documentElement.style;
+    r.setProperty('--accent',S.accent);
+    r.setProperty('--bg',S.bg);
+    r.setProperty('--accent-soft', mix(S.accent,'#ffffff',0.82));
+    r.setProperty('--font', `'${S.font}', system-ui, sans-serif`);
+    loadFont(S.font);
+  }
+  function mix(hex,white,t){ // simple tint
+    const h=hex.replace('#',''); const r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4,6),16);
+    const m=c=>Math.round(c+(255-c)*t); return `rgb(${m(r)},${m(g)},${m(b)})`;
+  }
+  const loadedFonts=new Set();
+  function loadFont(f){
+    if(['system-ui','-apple-system'].includes(f)||loadedFonts.has(f))return;
+    loadedFonts.add(f);
+    const l=document.createElement('link'); l.rel='stylesheet';
+    l.href=`https://fonts.googleapis.com/css2?family=${f.replace(/ /g,'+')}:wght@400;600;700;800&display=swap`;
+    document.head.appendChild(l);
+  }
+
+  /* ---------- ICS reminder ---------- */
+  function downloadICS(title, dateStr, timeStr, notes){
+    if(!dateStr){ toast('Add a due date first'); return; }
+    const dt = new Date(`${dateStr}T${timeStr||'09:00'}:00`);
+    const stamp = d => d.toISOString().replace(/[-:]/g,'').slice(0,15)+'Z';
+    const end = new Date(dt.getTime()+30*60000);
+    const ics = [
+      'BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//LifeHub//EN','CALSCALE:GREGORIAN',
+      'BEGIN:VEVENT','UID:'+Date.now()+'@lifehub',
+      'DTSTAMP:'+stamp(new Date()),'DTSTART:'+stamp(dt),'DTEND:'+stamp(end),
+      'SUMMARY:'+(title||'Reminder'), notes?('DESCRIPTION:'+notes.replace(/\n/g,'\\n')):'',
+      'BEGIN:VALARM','ACTION:DISPLAY','DESCRIPTION:'+(title||'Reminder'),'TRIGGER:-PT0M','END:VALARM',
+      'END:VEVENT','END:VCALENDAR'
+    ].filter(Boolean).join('\r\n');
+    const blob=new Blob([ics],{type:'text/calendar'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download=(title||'reminder').replace(/[^a-z0-9]/gi,'_').slice(0,30)+'.ics';
+    document.body.appendChild(a); a.click(); a.remove();
+    toast('Opening reminder — tap Add in Calendar');
+  }
+
+  /* ---------- supabase ---------- */
+  function connect(){
+    const url=localStorage.getItem(LS.url), key=localStorage.getItem(LS.key);
+    if(!url||!key){ $('#setup').style.display='block'; document.querySelectorAll('.tab-panel,nav.tabs,.fab').forEach(e=>e.style.display='none'); return false; }
+    sb = supabase.createClient(url,key);
+    return true;
+  }
+  function saveCreds(){
+    const u=$('#setUrl').value.trim(), k=$('#setKey').value.trim();
+    if(!u||!k){ toast('Both fields required'); return; }
+    localStorage.setItem(LS.url,u); localStorage.setItem(LS.key,k);
+    location.reload();
+  }
+
+  async function loadAll(){
+    $('#syncState').textContent='Syncing…';
+    try{
+      // settings
+      let { data:set } = await sb.from('app_settings').select('*').eq('id',1).maybeSingle();
+      if(set && set.data) S={...DEFAULTS, ...set.data};
+      else await sb.from('app_settings').insert({id:1,data:S});
+      applyTheme();
+
+      const grab = async (t,order)=>{ const {data:d,error}=await sb.from(t).select('*').order(order||'created_at'); if(error)throw error; return d||[]; };
+      data.shopping = await grab('shopping_items','created_at');
+      data.todos    = await grab('todos','created_at');
+      data.incomes  = await grab('budget_incomes','created_at');
+      data.expenses = await grab('budget_expenses','created_at');
+      data.recurring= await grab('recurring_expenses','created_at');
+      data.vios     = await grab('vios_entries','date');
+      data.loans    = await grab('loans','created_at');
+      data.payments = await grab('loan_payments','due_date');
+
+      await autoLogRecurring();
+      $('#syncState').textContent='Synced ✓';
+      renderAll();
+    }catch(e){
+      console.error(e);
+      $('#syncState').textContent='Sync error';
+      toast('Sync error — check tables/keys');
+    }
+  }
+
+  // create planned expense rows for active recurring templates for the visible month
+  async function autoLogRecurring(){
+    const adds=[];
+    for(const r of data.recurring.filter(x=>x.active!==false)){
+      const exists = data.expenses.some(e=>e.recurring_id===r.id && e.month===month && e.period===r.period);
+      if(!exists) adds.push({month, period:r.period, category:r.category, name:r.name, amount:r.amount, status:'planned', is_recurring:true, recurring_id:r.id});
+    }
+    if(adds.length){
+      const {data:ins}=await sb.from('budget_expenses').insert(adds).select();
+      if(ins) data.expenses.push(...ins);
+    }
+  }
+
+  /* ---------- generic CRUD ---------- */
+  async function ins(t,row,arr){ const {data:d,error}=await sb.from(t).insert(row).select(); if(error){toast('Save failed');return null;} arr.push(d[0]); return d[0]; }
+  async function upd(t,id,patch,arr){ const {error}=await sb.from(t).update(patch).eq('id',id); if(error){toast('Update failed');return;} const o=arr.find(x=>x.id===id); if(o)Object.assign(o,patch); }
+  async function del(t,id,arr){ const {error}=await sb.from(t).delete().eq('id',id); if(error){toast('Delete failed');return;} const i=arr.findIndex(x=>x.id===id); if(i>=0)arr.splice(i,1); }
+
+  /* ---------- navigation ---------- */
+  function go(t){
+    tab=t;
+    document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+    $('#tab-'+t).classList.add('active');
+    document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));
+    $('#fab').style.display = (t==='settings')?'none':'grid';
+    window.scrollTo(0,0);
+    render(t);
+  }
+
+  /* ---------- modal ---------- */
+  function openSheet(html){ $('#sheet').innerHTML=html; $('#scrim').classList.add('show'); }
+  function closeSheet(){ $('#scrim').classList.remove('show'); }
+  $('#scrim').addEventListener('click',e=>{ if(e.target.id==='scrim') closeSheet(); });
+
+  function catOptions(list,sel){ return list.map(c=>`<option ${c===sel?'selected':''}>${esc(c)}</option>`).join(''); }
+
+  /* ================= RENDERERS ================= */
+  function renderAll(){ render(tab); }
+  function render(t){
+    ({shopping:renderShopping, todos:renderTodos, budget:renderBudget,
+      vios:renderVios, loans:renderLoans, settings:renderSettings}[t]||(()=>{}))();
+  }
+
+  /* ----- Shopping ----- */
+  function renderShopping(){
+    const wrap=$('#shoppingList');
+    if(!data.shopping.length){ wrap.innerHTML=emptyState('Nothing on the list','Tap + to add your first item'); return; }
+    const byCat={};
+    data.shopping.forEach(i=>{ (byCat[i.category]=byCat[i.category]||[]).push(i); });
+    let html='';
+    Object.keys(byCat).sort().forEach(cat=>{
+      const items=byCat[cat].sort((a,b)=>a.bought-b.bought);
+      const left=items.filter(i=>!i.bought).length;
+      html+=`<div class="group-title">${esc(cat)} <span class="count">${left} to buy</span></div><div class="card">`;
+      items.forEach(i=>{
+        html+=`<div class="item ${i.bought?'done':''}">
+          <button class="check ${i.bought?'on':''}" onclick="App.toggleShop('${i.id}')">${i.bought?'✓':''}</button>
+          <div class="body"><div class="title">${esc(i.name)}</div>${i.qty?`<div class="meta">${esc(i.qty)}</div>`:''}</div>
+          <div class="acts"><button class="icon-btn del" onclick="App.delShop('${i.id}')">✕</button></div>
+        </div>`;
+      });
+      html+='</div>';
+    });
+    wrap.innerHTML=html;
+  }
+  async function toggleShop(id){ const i=data.shopping.find(x=>x.id===id); await upd('shopping_items',id,{bought:!i.bought},data.shopping); renderShopping(); }
+  async function delShop(id){ await del('shopping_items',id,data.shopping); renderShopping(); }
+  function shopForm(){
+    openSheet(`<h3>Add to shopping list</h3>
+      <div class="field"><label>Item</label><input id="f_name" placeholder="e.g. Coffee beans" /></div>
+      <div class="field two"><div><label>Category</label><select id="f_cat">${catOptions(S.cat_shopping,S.cat_shopping[0])}</select></div>
+      <div><label>Quantity / note</label><input id="f_qty" placeholder="optional" /></div></div>
+      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.addShop()">Add item</button></div>`);
+    setTimeout(()=>$('#f_name').focus(),100);
+  }
+  async function addShop(){
+    const name=$('#f_name').value.trim(); if(!name){toast('Name needed');return;}
+    await ins('shopping_items',{name,category:$('#f_cat').value,qty:$('#f_qty').value.trim(),bought:false},data.shopping);
+    closeSheet(); renderShopping();
+  }
+
+  /* ----- Todos ----- */
+  function renderTodos(){
+    const wrap=$('#todoList');
+    const open=data.todos.filter(t=>!t.completed), done=data.todos.filter(t=>t.completed);
+    if(!data.todos.length){ wrap.innerHTML=emptyState('All clear','Tap + to add a task — set a due date to send it to your iPhone'); return; }
+    let html='';
+    const byCat={}; open.forEach(t=>{(byCat[t.category]=byCat[t.category]||[]).push(t);});
+    Object.keys(byCat).sort().forEach(cat=>{
+      html+=`<div class="group-title">${esc(cat)} <span class="count">${byCat[cat].length}</span></div><div class="card">`;
+      byCat[cat].sort(sortDue).forEach(t=>html+=todoRow(t));
+      html+='</div>';
+    });
+    if(done.length){
+      html+=`<div class="group-title">Done <span class="count">${done.length}</span></div><div class="card">`;
+      done.forEach(t=>html+=todoRow(t)); html+='</div>';
+    }
+    wrap.innerHTML=html;
+  }
+  function sortDue(a,b){ return (a.due_date||'9999')+(a.due_time||'')<(b.due_date||'9999')+(b.due_time||'')?-1:1; }
+  function todoRow(t){
+    let due='';
+    if(t.due_date){
+      const overdue = !t.completed && (t.due_date < todayStr());
+      const today = t.due_date===todayStr();
+      const lbl = new Date(t.due_date+'T00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'})+(t.due_time?(' · '+t.due_time):'');
+      due=`<span class="pill ${overdue?'bad':today?'warn':'gray'}" style="margin-top:3px;display:inline-block">${overdue?'Overdue · ':''}${lbl}</span>`;
+    }
+    const pr = t.priority==='high'?'<span class="pill bad" style="margin-left:5px">High</span>':'';
+    return `<div class="item ${t.completed?'done':''}">
+      <button class="check ${t.completed?'on':''}" onclick="App.toggleTodo('${t.id}')">${t.completed?'✓':''}</button>
+      <div class="body"><div class="title">${esc(t.title)}${pr}</div>
+        ${t.notes?`<div class="meta">${esc(t.notes)}</div>`:''}${due}</div>
+      <div class="acts">
+        ${t.due_date&&!t.completed?`<button class="icon-btn" title="Send to iPhone" onclick="App.remindTodo('${t.id}')">🔔</button>`:''}
+        <button class="icon-btn del" onclick="App.delTodo('${t.id}')">✕</button></div>
+    </div>`;
+  }
+  async function toggleTodo(id){ const t=data.todos.find(x=>x.id===id); await upd('todos',id,{completed:!t.completed},data.todos); renderTodos(); }
+  async function delTodo(id){ await del('todos',id,data.todos); renderTodos(); }
+  function remindTodo(id){ const t=data.todos.find(x=>x.id===id); downloadICS(t.title,t.due_date,t.due_time,t.notes); }
+  function todoForm(){
+    openSheet(`<h3>New task</h3>
+      <div class="field"><label>Task</label><input id="f_title" placeholder="What needs doing?" /></div>
+      <div class="field"><label>Notes</label><textarea id="f_notes" placeholder="optional"></textarea></div>
+      <div class="field two"><div><label>Category</label><select id="f_cat">${catOptions(S.cat_todos,S.cat_todos[0])}</select></div>
+      <div><label>Priority</label><select id="f_pr"><option value="normal">Normal</option><option value="high">High</option></select></div></div>
+      <div class="field two"><div><label>Due date</label><input id="f_date" type="date" /></div>
+      <div><label>Time</label><input id="f_time" type="time" /></div></div>
+      <p class="muted" style="font-size:12px">Tip: add a due date, then tap 🔔 on the task to drop a self-firing reminder into your iPhone's Calendar/Reminders.</p>
+      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.addTodo()">Add task</button></div>`);
+    setTimeout(()=>$('#f_title').focus(),100);
+  }
+  async function addTodo(){
+    const title=$('#f_title').value.trim(); if(!title){toast('Task needed');return;}
+    await ins('todos',{title,notes:$('#f_notes').value.trim(),category:$('#f_cat').value,priority:$('#f_pr').value,
+      due_date:$('#f_date').value||null,due_time:$('#f_time').value||null,completed:false},data.todos);
+    closeSheet(); renderTodos();
+  }
+
+  /* ----- Budget ----- */
+  function setPeriod(p){ period=p; document.querySelectorAll('#periodSeg button').forEach(b=>b.classList.toggle('on',b.dataset.p===p)); renderBudget(); }
+  function shiftMonth(d){ const dt=new Date(month+'-01'); dt.setMonth(dt.getMonth()+d); month=dt.toISOString().slice(0,7); autoLogRecurring().then(renderBudget); }
+  function periodsActive(){ return period==='both'?['mid','end']:[period]; }
+
+  function renderBudget(){
+    $('#monthLabel').textContent=monthName(month);
+    $('#budgetHint').textContent = `Pay: ${S.payMid}th & ${S.payEnd}th`;
+    const ps=periodsActive();
+    const exps=data.expenses.filter(e=>e.month===month && ps.includes(e.period));
+    const incs=data.incomes.filter(i=>i.month===month && ps.includes(i.period));
+    const income=incs.reduce((s,i)=>s+Number(i.amount||0),0);
+    const planned=exps.filter(e=>e.status==='planned'), paid=exps.filter(e=>e.status==='paid');
+    const sumPlanned=planned.reduce((s,e)=>s+Number(e.amount||0),0);
+    const sumPaid=paid.reduce((s,e)=>s+Number(e.amount||0),0);
+    const remaining=income-sumPaid-sumPlanned;
+    const savings=Math.max(0, remaining*(S.savingsPct/100));
+
+    let html='';
+    // income editor
+    html+=`<div class="card"><div class="row"><h3 style="font-size:15px">Income</h3><div class="spacer"></div><button class="btn ghost tiny" onclick="App.incomeForm()">Set income</button></div>`;
+    if(incs.length){ html+='<div style="margin-top:8px">'; incs.forEach(i=>{
+      html+=`<div class="exp"><span class="nm">${i.period==='mid'?'Mid-month':'End-month'}${i.label?(' · '+esc(i.label)):''}</span><span class="amt">${money(i.amount)}</span>
+        <button class="icon-btn del" style="margin-left:8px" onclick="App.delInc('${i.id}')">✕</button></div>`;
+    }); html+='</div>'; } else html+='<p class="muted" style="font-size:13px;margin-top:6px">No income set for this period yet.</p>';
+    html+='</div>';
+
+    // summary
+    html+=`<div class="summary">
+      <div class="stat big ${remaining<0?'bad':'good'}"><div class="k">Remaining after planned + paid</div><div class="v">${money(remaining)}</div></div>
+      <div class="stat"><div class="k">Income</div><div class="v">${money(income)}</div></div>
+      <div class="stat"><div class="k">Paid</div><div class="v">${money(sumPaid)}</div></div>
+      <div class="stat"><div class="k">Planned</div><div class="v">${money(sumPlanned)}</div></div>
+      <div class="stat good"><div class="k">Suggested savings (${S.savingsPct}%)</div><div class="v">${money(savings)}</div></div>
+    </div>`;
+
+    html+=groupBlock('Planned', planned, 'planned');
+    html+=groupBlock('Paid', paid, 'paid');
+    $('#budgetBody').innerHTML=html;
+  }
+  function groupBlock(title, list, status){
+    const total=list.reduce((s,e)=>s+Number(e.amount||0),0);
+    const byCat={}; list.forEach(e=>{(byCat[e.category]=byCat[e.category]||[]).push(e);});
+    let inner='';
+    if(!list.length){ inner=`<p class="muted" style="font-size:13px;padding:6px 2px">Nothing here yet.</p>`; }
+    else{
+      inner='<div class="cols">';
+      Object.keys(byCat).sort().forEach(cat=>{
+        const csum=byCat[cat].reduce((s,e)=>s+Number(e.amount||0),0);
+        inner+=`<div class="colcard"><h4>${esc(cat)} <span class="sum">${money(csum)}</span></h4>`;
+        byCat[cat].forEach(e=>{
+          inner+=`<div class="exp"><span class="nm">${esc(e.name)}${e.is_recurring?' ↻':''}</span><span class="amt">${money(e.amount)}</span>
+            <button class="icon-btn" title="${status==='planned'?'Mark paid':'Mark planned'}" onclick="App.toggleExp('${e.id}')">${status==='planned'?'✓':'↩'}</button>
+            <button class="icon-btn del" onclick="App.delExp('${e.id}')">✕</button></div>`;
+        });
+        inner+='</div>';
+      });
+      inner+='</div>';
+    }
+    return `<div class="group-title">${title} <span class="count">${money(total)}</span></div><div class="card">${inner}</div>`;
+  }
+  async function toggleExp(id){ const e=data.expenses.find(x=>x.id===id); const ns=e.status==='planned'?'paid':'planned';
+    await upd('budget_expenses',id,{status:ns, paid_date: ns==='paid'?todayStr():null},data.expenses); renderBudget(); }
+  async function delExp(id){ await del('budget_expenses',id,data.expenses); renderBudget(); }
+  async function delInc(id){ await del('budget_incomes',id,data.incomes); renderBudget(); }
+
+  function expenseForm(){
+    const p = period==='both'?'mid':period;
+    openSheet(`<h3>Add expense — ${monthName(month)}</h3>
+      <div class="field"><label>Name</label><input id="f_name" placeholder="e.g. Electricity" /></div>
+      <div class="field two"><div><label>Amount</label><input id="f_amt" type="number" inputmode="decimal" placeholder="0" /></div>
+      <div><label>Category</label><select id="f_cat">${catOptions(S.cat_budget,S.cat_budget[0])}</select></div></div>
+      <div class="field two"><div><label>Pay period</label><select id="f_per"><option value="mid" ${p==='mid'?'selected':''}>Mid-month</option><option value="end" ${p==='end'?'selected':''}>End-month</option></select></div>
+      <div><label>Status</label><select id="f_st"><option value="planned">Planned</option><option value="paid">Paid</option></select></div></div>
+      <div class="field"><label><input type="checkbox" id="f_rec" style="width:auto;margin-right:6px"> Make this a recurring expense (auto-added every month)</label></div>
+      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.addExp()">Add</button></div>`);
+    setTimeout(()=>$('#f_name').focus(),100);
+  }
+  async function addExp(){
+    const name=$('#f_name').value.trim(); const amt=parseFloat($('#f_amt').value)||0;
+    if(!name){toast('Name needed');return;}
+    const per=$('#f_per').value, cat=$('#f_cat').value, st=$('#f_st').value, rec=$('#f_rec').checked;
+    let recId=null;
+    if(rec){ const r=await ins('recurring_expenses',{name,category:cat,amount:amt,period:per,active:true},data.recurring); recId=r&&r.id; }
+    await ins('budget_expenses',{month,period:per,category:cat,name,amount:amt,status:st,is_recurring:rec,recurring_id:recId,paid_date:st==='paid'?todayStr():null},data.expenses);
+    closeSheet(); renderBudget();
+  }
+  function incomeForm(){
+    const ps=periodsActive(); const cur={};
+    data.incomes.filter(i=>i.month===month).forEach(i=>cur[i.period]=i);
+    openSheet(`<h3>Income — ${monthName(month)}</h3>
+      <div class="field two"><div><label>Mid-month (₱)</label><input id="i_mid" type="number" inputmode="decimal" value="${cur.mid?cur.mid.amount:''}" placeholder="0" /></div>
+      <div><label>End-month (₱)</label><input id="i_end" type="number" inputmode="decimal" value="${cur.end?cur.end.amount:''}" placeholder="0" /></div></div>
+      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.saveIncome()">Save</button></div>`);
+  }
+  async function saveIncome(){
+    for(const per of ['mid','end']){
+      const v=parseFloat($('#i_'+per).value); if(isNaN(v))continue;
+      const ex=data.incomes.find(i=>i.month===month&&i.period===per);
+      if(ex) await upd('budget_incomes',ex.id,{amount:v},data.incomes);
+      else await ins('budget_incomes',{month,period:per,amount:v,label:''},data.incomes);
+    }
+    closeSheet(); renderBudget();
+  }
+
+  /* ----- Vios ----- */
+  function renderVios(){
+    const inc=data.vios.filter(v=>v.kind==='income').reduce((s,v)=>s+Number(v.amount||0),0);
+    const exp=data.vios.filter(v=>v.kind==='expense').reduce((s,v)=>s+Number(v.amount||0),0);
+    let html=`<div class="summary"><div class="stat big ${inc-exp<0?'bad':'good'}"><div class="k">Net</div><div class="v">${money(inc-exp)}</div></div>
+      <div class="stat"><div class="k">Income</div><div class="v">${money(inc)}</div></div>
+      <div class="stat"><div class="k">Costs</div><div class="v">${money(exp)}</div></div></div>`;
+    if(!data.vios.length){ html+=emptyState('No Vios entries','Log rental income and any costs (fuel, maintenance, insurance)'); }
+    else{
+      html+='<div class="group-title">Entries</div><div class="card">';
+      data.vios.slice().reverse().forEach(v=>{
+        html+=`<div class="item"><div class="body"><div class="title">${esc(v.description||(v.kind==='income'?'Rental income':'Cost'))}</div>
+          <div class="meta">${new Date(v.date+'T00:00').toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}</div></div>
+          <div class="amt" style="font-weight:700;color:${v.kind==='income'?'var(--good)':'var(--bad)'}">${v.kind==='income'?'+':'−'}${money(v.amount)}</div>
+          <button class="icon-btn del" style="margin-left:8px" onclick="App.delVios('${v.id}')">✕</button></div>`;
+      });
+      html+='</div>';
+    }
+    $('#viosBody').innerHTML=html;
+  }
+  async function delVios(id){ await del('vios_entries',id,data.vios); renderVios(); }
+  function viosForm(){
+    openSheet(`<h3>Vios entry</h3>
+      <div class="field"><label>Type</label><select id="f_kind"><option value="income">Income (rental received)</option><option value="expense">Cost (fuel, repair, etc.)</option></select></div>
+      <div class="field"><label>Description</label><input id="f_desc" placeholder="e.g. Weekly rental — Mr. Cruz" /></div>
+      <div class="field two"><div><label>Amount</label><input id="f_amt" type="number" inputmode="decimal" placeholder="0" /></div>
+      <div><label>Date</label><input id="f_date" type="date" value="${todayStr()}" /></div></div>
+      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.addVios()">Add</button></div>`);
+  }
+  async function addVios(){
+    const amt=parseFloat($('#f_amt').value)||0; if(!amt){toast('Amount needed');return;}
+    await ins('vios_entries',{kind:$('#f_kind').value,description:$('#f_desc').value.trim(),amount:amt,date:$('#f_date').value||todayStr()},data.vios);
+    closeSheet(); renderVios();
+  }
+
+  /* ----- Loans ----- */
+  function renderLoans(){
+    if(!data.loans.length){ $('#loanBody').innerHTML=emptyState('No long-term payments','Add a loan or amortization (e.g. car) with its balance, then schedule payments'); return; }
+    let html='';
+    data.loans.forEach(loan=>{
+      const pays=data.payments.filter(p=>p.loan_id===loan.id).sort((a,b)=>a.due_date<b.due_date?-1:1);
+      const paid=pays.filter(p=>p.status==='paid');
+      const overdue=pays.filter(p=>p.status!=='paid'&&p.due_date<todayStr());
+      const planned=pays.filter(p=>p.status!=='paid'&&p.due_date>=todayStr());
+      html+=`<div class="card">
+        <div class="row"><h3 style="font-size:16px">${esc(loan.name)}</h3><div class="spacer"></div>
+          <span class="pill ${loan.balance>0?'warn':'good'}">Balance ${money(loan.balance)}</span></div>
+        ${loan.notes?`<div class="meta muted" style="font-size:12px;margin-top:4px">${esc(loan.notes)}</div>`:''}
+        <div style="margin-top:6px"><button class="btn ghost tiny" onclick="App.payForm('${loan.id}')">+ Schedule payment</button>
+          <button class="btn line tiny" onclick="App.delLoan('${loan.id}')">Delete loan</button></div>
+        ${payTable('Overdue', overdue, 'bad')}
+        ${payTable('Planned', planned, 'gray')}
+        ${payTable('Paid', paid, 'good')}
+      </div>`;
+    });
+    $('#loanBody').innerHTML=html;
+  }
+  function payTable(title, list, cls){
+    if(!list.length) return '';
+    let rows=list.map(p=>{
+      const per=p.pay_period==='mid'?'Mid':'End';
+      const act = p.status==='paid'
+        ? `<button class="icon-btn" title="Undo" onclick="App.unpay('${p.id}')">↩</button>`
+        : `<button class="btn tiny" onclick="App.markPaid('${p.id}')">Pay</button>`;
+      return `<tr><td>${new Date(p.due_date+'T00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'})}<br><span class="muted" style="font-size:11px">${per}</span></td>
+        <td class="num">${money(p.amount_due)}</td>
+        <td class="num">${p.status==='paid'?money(p.amount_paid):'—'}</td>
+        <td class="num">${money(p.balance_after)}</td>
+        <td style="text-align:right">${act} <button class="icon-btn del" onclick="App.delPay('${p.id}')">✕</button></td></tr>`;
+    }).join('');
+    return `<div class="group-title" style="margin-top:14px"><span class="pill ${cls}">${title}</span> <span class="count">${list.length}</span></div>
+      <table class="pay"><thead><tr><th>Due</th><th class="num">Due amt</th><th class="num">Paid</th><th class="num">Bal after</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+  async function markPaid(id){
+    const p=data.payments.find(x=>x.id===id); const loan=data.loans.find(l=>l.id===p.loan_id);
+    const newBal=Math.max(0, Number(loan.balance||0)-Number(p.amount_due||0));
+    await upd('loan_payments',id,{status:'paid',amount_paid:p.amount_due,paid_date:todayStr(),balance_after:newBal},data.payments);
+    await upd('loans',loan.id,{balance:newBal},data.loans);
+    renderLoans(); toast('Paid — balance carried over');
+  }
+  async function unpay(id){
+    const p=data.payments.find(x=>x.id===id); const loan=data.loans.find(l=>l.id===p.loan_id);
+    const restored=Number(loan.balance||0)+Number(p.amount_paid||0);
+    await upd('loan_payments',id,{status:'planned',amount_paid:0,paid_date:null,balance_after:restored},data.payments);
+    await upd('loans',loan.id,{balance:restored},data.loans);
+    renderLoans();
+  }
+  async function delPay(id){ await del('loan_payments',id,data.payments); renderLoans(); }
+  async function delLoan(id){
+    if(!confirm('Delete this loan and all its payments?'))return;
+    await sb.from('loan_payments').delete().eq('loan_id',id);
+    data.payments=data.payments.filter(p=>p.loan_id!==id);
+    await del('loans',id,data.loans); renderLoans();
+  }
+  function loanForm(){
+    openSheet(`<h3>New long-term payment</h3>
+      <div class="field"><label>Name</label><input id="f_name" placeholder="e.g. Vios car amortization" /></div>
+      <div class="field two"><div><label>Total / principal</label><input id="f_prin" type="number" inputmode="decimal" placeholder="0" /></div>
+      <div><label>Current balance</label><input id="f_bal" type="number" inputmode="decimal" placeholder="0" /></div></div>
+      <div class="field"><label>Usual installment</label><input id="f_inst" type="number" inputmode="decimal" placeholder="0" /></div>
+      <div class="field"><label>Notes</label><input id="f_notes" placeholder="lender, term, etc." /></div>
+      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.addLoan()">Add</button></div>`);
+    setTimeout(()=>$('#f_name').focus(),100);
+  }
+  async function addLoan(){
+    const name=$('#f_name').value.trim(); if(!name){toast('Name needed');return;}
+    const prin=parseFloat($('#f_prin').value)||0, bal=parseFloat($('#f_bal').value)||prin, inst=parseFloat($('#f_inst').value)||0;
+    await ins('loans',{name,principal:prin,balance:bal,installment:inst,notes:$('#f_notes').value.trim()},data.loans);
+    closeSheet(); renderLoans();
+  }
+  function payForm(loanId){
+    const loan=data.loans.find(l=>l.id===loanId);
+    openSheet(`<h3>Schedule payment — ${esc(loan.name)}</h3>
+      <div class="field two"><div><label>Due date</label><input id="p_date" type="date" value="${todayStr()}" /></div>
+      <div><label>Pay period</label><select id="p_per"><option value="mid">Mid-month</option><option value="end">End-month</option></select></div></div>
+      <div class="field"><label>Amount due</label><input id="p_amt" type="number" inputmode="decimal" value="${loan.installment||''}" placeholder="0" /></div>
+      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.addPay('${loanId}')">Add payment</button></div>`);
+  }
+  async function addPay(loanId){
+    const loan=data.loans.find(l=>l.id===loanId);
+    const amt=parseFloat($('#p_amt').value)||0;
+    await ins('loan_payments',{loan_id:loanId,due_date:$('#p_date').value||todayStr(),pay_period:$('#p_per').value,
+      amount_due:amt,amount_paid:0,status:'planned',balance_after:Number(loan.balance||0)},data.payments);
+    closeSheet(); renderLoans();
+  }
+
+  /* ----- Settings ----- */
+  const PALETTES=[['#7c6f9c','Lavender'],['#c4717a','Rosewood'],['#5b8a72','Sage'],['#8c4a28','Terracotta'],['#4a6fa5','Slate blue'],['#b3823e','Amber'],['#6a7b8c','Stone']];
+  const FONTS=['Manrope','Inter','Nunito','Poppins','Lora','Quicksand','Work Sans','DM Sans'];
+  function renderSettings(){
+    let html=`<div class="card"><h3 style="font-size:15px;margin-bottom:10px">Appearance</h3>
+      <div class="field"><label>Accent colour</label><div class="row" style="flex-wrap:wrap">
+        ${PALETTES.map(([c,n])=>`<button class="swatch ${S.accent===c?'on':''}" style="background:${c}" title="${n}" onclick="App.setOpt('accent','${c}')"></button>`).join('')}
+        <input type="color" value="${S.accent}" onchange="App.setOpt('accent',this.value)" style="width:34px;height:34px;border:none;background:none;padding:0" /></div></div>
+      <div class="field"><label>Background</label><div class="row">
+        ${['#faf7f2','#ffffff','#f3f5f7','#f7f3f9','#1c1b22'].map(c=>`<button class="swatch ${S.bg===c?'on':''}" style="background:${c}" onclick="App.setOpt('bg','${c}')"></button>`).join('')}</div></div>
+      <div class="field"><label>Font</label><select onchange="App.setOpt('font',this.value)">${FONTS.map(f=>`<option ${S.font===f?'selected':''}>${f}</option>`).join('')}</select></div>
+    </div>`;
+
+    html+=`<div class="card"><h3 style="font-size:15px;margin-bottom:10px">Budget setup</h3>
+      <div class="field two"><div><label>Currency symbol</label><input value="${esc(S.currency)}" onchange="App.setOpt('currency',this.value)" /></div>
+      <div><label>Savings target %</label><input type="number" value="${S.savingsPct}" onchange="App.setOpt('savingsPct',+this.value)" /></div></div>
+      <div class="field two"><div><label>Mid-month pay day</label><input type="number" value="${S.payMid}" onchange="App.setOpt('payMid',+this.value)" /></div>
+      <div><label>End-month pay day</label><input type="number" value="${S.payEnd}" onchange="App.setOpt('payEnd',+this.value)" /></div></div></div>`;
+
+    html+=catEditor('Shopping categories','cat_shopping');
+    html+=catEditor('To-Do categories','cat_todos');
+    html+=catEditor('Budget categories','cat_budget');
+
+    html+=`<div class="card"><h3 style="font-size:15px;margin-bottom:6px">Recurring expense templates</h3>
+      <p class="muted" style="font-size:12px">These auto-add as planned each month. Mark an expense "recurring" when adding it to create one.</p>`;
+    if(data.recurring.length){ html+='<div style="margin-top:8px">'; data.recurring.forEach(r=>{
+      html+=`<div class="exp"><span class="nm">${esc(r.name)} <span class="muted">· ${r.period==='mid'?'Mid':'End'} · ${esc(r.category)}</span></span><span class="amt">${money(r.amount)}</span>
+        <button class="icon-btn del" style="margin-left:8px" onclick="App.delRecurring('${r.id}')">✕</button></div>`;
+    }); html+='</div>'; } else html+='<p class="muted" style="font-size:13px;margin-top:6px">None yet.</p>';
+    html+='</div>';
+
+    html+=`<div class="card"><h3 style="font-size:15px;margin-bottom:8px">Add to Home Screen</h3>
+      <p class="muted" style="font-size:13px">In Safari: tap <b>Share</b> → <b>Add to Home Screen</b>. LifeHub then opens full-screen like an app.</p></div>`;
+
+    html+=`<div class="card"><button class="btn line" style="width:100%;justify-content:center" onclick="App.resetCreds()">Disconnect this device</button></div>`;
+    $('#settingsBody').innerHTML=html;
+  }
+  function catEditor(title,key){
+    return `<div class="card"><h3 style="font-size:15px;margin-bottom:10px">${title}</h3>
+      <div class="chips" id="chips_${key}">
+        ${S[key].map((c,i)=>`<span class="chip">${esc(c)}<button onclick="App.removeCat('${key}',${i})">✕</button></span>`).join('')}
+      </div>
+      <div class="row" style="margin-top:10px"><input id="newcat_${key}" placeholder="Add category" style="flex:1;padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:var(--bg)" />
+        <button class="btn ghost tiny" onclick="App.addCat('${key}')">Add</button></div></div>`;
+  }
+  async function setOpt(k,v){ S[k]=v; applyTheme(); await saveSettings(); if(tab==='settings')renderSettings(); }
+  async function addCat(key){ const inp=$('#newcat_'+key); const v=inp.value.trim(); if(!v)return; if(!S[key].includes(v))S[key].push(v); inp.value=''; await saveSettings(); renderSettings(); }
+  async function removeCat(key,i){ S[key].splice(i,1); await saveSettings(); renderSettings(); }
+  async function delRecurring(id){ await del('recurring_expenses',id,data.recurring); renderSettings(); }
+  async function saveSettings(){ await sb.from('app_settings').update({data:S,updated_at:new Date().toISOString()}).eq('id',1); }
+  function resetCreds(){ if(confirm('Disconnect? Your data stays in Supabase; you can reconnect anytime.')){ localStorage.removeItem(LS.url); localStorage.removeItem(LS.key); location.reload(); } }
+
+  function emptyState(b,p){ return `<div class="empty"><b>${b}</b>${p}</div>`; }
+
+  /* ----- FAB router ----- */
+  function fab(){ ({shopping:shopForm,todos:todoForm,budget:expenseForm,vios:viosForm,loans:loanForm}[tab]||(()=>{}))(); }
+
+  /* ----- init ----- */
+  function init(){
+    if(!connect())return;
+    go('shopping');
+    loadAll();
+  }
+
+  return { init, go, fab, saveCreds, closeSheet,
+    toggleShop, delShop, shopForm, addShop,
+    toggleTodo, delTodo, remindTodo, todoForm, addTodo,
+    setPeriod, shiftMonth, renderBudget, incomeForm, saveIncome, delInc,
+    expenseForm, addExp, toggleExp, delExp,
+    viosForm, addVios, delVios,
+    loanForm, addLoan, delLoan, payForm, addPay, markPaid, unpay, delPay,
+    setOpt, addCat, removeCat, delRecurring, resetCreds };
+})();
+document.addEventListener('DOMContentLoaded', App.init);
+</script>
+</body>
+</html>
