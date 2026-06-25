@@ -836,6 +836,12 @@ function renderBudget(){
     html+=`<div class="card"><h3 style="font-size:15px;margin-bottom:8px">Add to Home Screen</h3>
       <p class="muted" style="font-size:13px">In Safari: tap <b>Share</b> → <b>Add to Home Screen</b>. LifeHub then opens full-screen like an app.</p></div>`;
 
+    html+=`<div class="card">
+  <h3 style="font-size:15px;margin-bottom:6px">System Alerts</h3>
+  <p class="muted" style="font-size:13px;margin-bottom:10px">Enable direct, automated banner notifications on this iPhone.</p>
+  <button class="btn" style="width:100%;justify-content:center" onclick="App.initPushNotifications()">Enable Notifications</button>
+</div>`;
+    
     html+=`<div class="card"><button class="btn line" style="width:100%;justify-content:center" onclick="App.resetCreds()">Disconnect this device</button></div>`;
     $('#settingsBody').innerHTML=html;
   }
