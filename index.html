@@ -616,8 +616,12 @@ async function loadAll(){
         </div>
         <div class="muted" style="font-size:12px; margin-top:4px; margin-bottom:12px;">
           Default Monthly Installment: <b>${money(loan.installment)}</b> ${loan.notes ? `· ${esc(loan.notes)}` : ''}
+        </div>
+        <div class="row" style="margin-top:8px; margin-bottom:14px; gap:8px;">
+          <button class="btn ghost tiny" onclick="App.editLoanSettingsForm('${loan.id}')">⚙︎ Edit Baseline</button>
+          <button class="btn line tiny" style="color:var(--bad)" onclick="App.delLoan('${loan.id}')">✕ Delete Loan</button>
         </div>`;
-
+      
       rows.forEach((p, index) => {
         let addedInstallment = 0;
         if (p.period === 'end') {
@@ -907,6 +911,7 @@ async function loadAll(){
     viosForm, addVios, delVios,
     loanForm, addLoan, delLoan, planForm, savePlan, payForm, confirmPay, unpayPeriod, delPeriod, remindLoan,
     extendNextPeriod,
+    editLoanSettingsForm, saveLoanSettings,
     setOpt, addCat, removeCat, delRecurring, resetCreds };
 })();
 document.addEventListener('DOMContentLoaded', App.init);
