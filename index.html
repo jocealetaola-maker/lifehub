@@ -606,8 +606,6 @@ async function loadAll(){
     
     data.loans.forEach(loan=>{
       const rows = data.periods.filter(p=>p.loan_id===loan.id).sort(sortPeriods);
-      
-      // We will dynamically compute the running balances downstream 
       let currentRunningBalance = Number(loan.balance || 0);
 
       html+=`<div class="card" style="margin-bottom: 20px;">
@@ -621,8 +619,6 @@ async function loadAll(){
         </div>`;
 
       rows.forEach((p, index) => {
-        // --- LIVE MATH WATERFALL ENGINE ---
-        // If this is an end-of-month period, the fresh monthly installment (e.g. 28k) is added to the balance stack
         let addedInstallment = 0;
         if (p.period === 'end') {
           addedInstallment = Number(loan.installment || 0);
@@ -630,12 +626,9 @@ async function loadAll(){
 
         const startingBalanceThisPeriod = currentRunningBalance;
         const totalStackedDue = startingBalanceThisPeriod + addedInstallment;
-        
-        // Use paid amount if locked in, otherwise subtract your planned allocation dynamically!
         const effectivePayment = p.status === 'paid' ? Number(p.paid_amount || 0) : Number(p.planned_payment || 0);
         const projectedBalanceAfter = Math.max(0, totalStackedDue - effectivePayment);
         
-        // Pass this computed balance down to the next period in the loop chain
         currentRunningBalance = projectedBalanceAfter;
 
         const overdue = p.status !== 'paid' && p.due_date && p.due_date < todayStr();
@@ -747,7 +740,6 @@ async function loadAll(){
     const p=data.periods.find(x=>x.id===id), loan=data.loans.find(l=>l.id===p.loan_id);
     const paid=parseFloat($('#f_paid').value)||0;
     
-    // Compute true dynamic baseline deduction
     let monthlyInstallmentImpact = p.period === 'end' ? Number(loan.installment || 0) : 0;
     const trueCurrentAssetDue = Number(loan.balance) + monthlyInstallmentImpact;
     const remainingAssetBalance = Math.max(0, trueCurrentAssetDue - paid);
