@@ -330,7 +330,7 @@ const App = (() => {
     location.reload();
   }
 
-  async function loadAll(){
+async function loadAll(){
     $('#syncState').textContent='Syncing…';
     try{
       // settings
@@ -339,15 +339,29 @@ const App = (() => {
       else await sb.from('app_settings').insert({id:1,data:S});
       applyTheme();
 
-      const grab = async (t,order)=>{ const {data:d,error}=await sb.from(t).select('*').order(order||'created_at'); if(error)throw error; return d||[]; };
-      data.shopping = await grab('shopping_items','created_at');
-      data.incomes  = await grab('budget_incomes','created_at');
-      data.expenses = await grab('budget_expenses','created_at');
-      data.recurring= await grab('recurring_expenses','created_at');
-      data.vios     = await grab('vios_entries','date');
-      data.loans    = await grab('loans','created_at');
-      data.payments = await grab('loan_payments','month');
-      data.periods  = await grab('loan_periods','month');
+      // Safe grab helper that won't completely crash if sorting fails
+      const grab = async (t, orderField) => { 
+        let query = sb.from(t).select('*');
+        if (orderField) query = query.order(orderField, { ascending: true });
+        const { data: d, error } = await query;
+        if (error) {
+          console.warn(`Fallback fetch for table ${t}:`, error);
+          const { data: retryData } = await sb.from(t).select('*');
+          return retryData || [];
+        }
+        return d || []; 
+      };
+
+      data.shopping = await grab('shopping_items', 'created_at');
+      data.incomes  = await grab('budget_incomes', 'created_at');
+      data.expenses = await grab('budget_expenses', 'created_at');
+      data.recurring= await grab('recurring_expenses', 'created_at');
+      data.vios     = await grab('vios_entries', 'date');
+      data.loans    = await grab('loans', 'created_at');
+      
+      // Fallback safe fetches for loan attachments
+      try { data.payments = await grab('loan_payments'); } catch(e) { data.payments = []; }
+      try { data.periods  = await grab('loan_periods'); } catch(e) { data.periods = []; }
 
       await autoLogRecurring();
       $('#syncState').textContent='Synced ✓';
