@@ -785,18 +785,56 @@ async function loadAll(){
     const p=data.periods.find(x=>x.id===id), loan=data.loans.find(l=>l.id===p.loan_id);
     downloadICS(loan.name+' Payment Due', p.due_date, '09:00', 'Simulated Plan Target: '+money(p.planned_payment));
   }
+ 
+  /* ----- Safe Structural Modification Methods ----- */
+  function editLoanSettingsForm(loanId){
+    const loan = data.loans.find(l=>l.id===loanId);
+    openSheet(`<h3>Edit Loan / Vehicle Baseline</h3>
+      <div class="field"><label>Name</label><input id="e_loan_name" value="${esc(loan.name)}" /></div>
+      <div class="field two">
+        <div><label>Current Base Balance (₱)</label><input id="e_loan_bal" type="number" inputmode="decimal" value="${loan.balance}" /></div>
+        <div><label>Fixed Monthly Installment (₱)</label><input id="e_loan_pay" type="number" inputmode="decimal" value="${loan.installment}" /></div>
+      </div>
+      <div class="field"><label>Notes</label><input id="e_loan_notes" value="${esc(loan.notes)}" /></div>
+      <div class="sheet-acts">
+        <button class="btn line" onclick="App.closeSheet()">Cancel</button>
+        <button class="btn" onclick="App.saveLoanSettings('${loanId}')">Save Changes</button>
+      </div>`);
+  }
+
+  async function saveLoanSettings(loanId){
+    const name = $('#e_loan_name').value.trim(); if(!name){toast('Name needed');return;}
+    const bal = parseFloat($('#e_loan_bal').value)||0;
+    const pay = parseFloat($('#e_loan_pay').value)||0;
+    const notes = $('#e_loan_notes').value.trim();
+
+    await upd('loans', loanId, { name, balance: bal, installment: pay, notes }, data.loans);
+    closeSheet();
+    renderLoans();
+    toast('Loan baseline modified! 🎉');
+  }
+  
   async function delPeriod(id){
     const ex=data.expenses.find(e=>e.source==='loan'&&e.source_id===id);
     if(ex) await del('budget_expenses',ex.id,data.expenses);
     await del('loan_periods',id,data.periods); renderLoans();
   }
-  async function delLoan(id){
-    if(!confirm('Delete this loan entirely?'))return;
-    const ids=data.periods.filter(p=>p.loan_id===id).map(p=>p.id);
-    for(const e of data.expenses.filter(e=>e.source==='loan'&&ids.includes(e.source_id))) await del('budget_expenses',e.id,data.expenses);
-    await sb.from('loan_periods').delete().eq('loan_id',id);
-    data.periods=data.periods.filter(p=>p.loan_id!==id);
-    await del('loans',id,data.loans); renderLoans();
+ async function delLoan(id){
+    if(!confirm('Are you absolutely sure you want to completely delete this loan asset and its calculation windows?')) return;
+    $('#syncState').textContent='Deleting…';
+    try {
+      data.expenses = data.expenses.filter(e => !(e.source === 'loan' && data.periods.filter(p=>p.loan_id===id).map(x=>x.id).includes(e.source_id)));
+      await sb.from('loan_periods').delete().eq('loan_id', id);
+      await sb.from('loans').delete().eq('id', id);
+      data.periods = data.periods.filter(p => p.loan_id !== id);
+      data.loans = data.loans.filter(l => l.id !== id);
+      $('#syncState').textContent='Synced ✓';
+      renderLoans();
+      toast('Loan wiped successfully!');
+    } catch (err) {
+      console.error(err);
+      toast('Delete failed — check connection');
+    }
   }
 
   /* ----- Settings ----- */
