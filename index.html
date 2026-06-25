@@ -859,14 +859,53 @@ function renderBudget(){
   /* ----- FAB router ----- */
   function fab(){ ({shopping:shopForm,todos:todoForm,budget:expenseForm,vios:viosForm,loans:loanForm}[tab]||(()=>{}))(); }
 
+  /* ----- Push Notifications Setup ----- */
+  async function initPushNotifications() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      toast('Push messaging is not supported on this browser/device.');
+      return;
+    }
+
+    try {
+      // 1. Register the background sw.js file you created
+      const registration = await navigator.serviceWorker.register('sw.js');
+      
+      // 2. Ask iOS for native banner permission
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        toast('Notification permission denied.');
+        return;
+      }
+
+      // 3. Request a unique notification token from Apple
+      // NOTE: You will eventually replace 'YOUR_PUBLIC_VAPID_KEY' in Step 4
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: 'YOUR_PUBLIC_VAPID_KEY' 
+      });
+
+      // 4. Save this device address straight into your new Supabase table
+      await sb.from('user_device_tokens').insert({
+        device_subscription_json: JSON.stringify(subscription)
+      });
+
+      toast('Notifications linked successfully! 🎉');
+    } catch (e) {
+      console.error(e);
+      toast('Failed to setup notifications.');
+    }
+  }
+  
   /* ----- init ----- */
   function init(){
     if(!connect())return;
     go('shopping');
     loadAll();
+    initPushNotifications(); // <-- Add this line right here
   }
 
   return { init, go, fab, saveCreds, closeSheet,
+          initPushNotifications, // <-- Add this line here too
     toggleShop, delShop, shopForm, addShop,
     toggleTodo, delTodo, remindTodo, todoForm, addTodo,
     setPeriod, shiftMonth, renderBudget, incomeForm, saveIncome, delInc,
