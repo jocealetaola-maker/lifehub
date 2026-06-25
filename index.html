@@ -186,15 +186,6 @@
 </header>
 
 <main>
-  <section id="setup" class="setup" style="display:none">
-    <div class="card">
-      <h2 style="margin-bottom:6px">One-time setup</h2>
-      <p class="muted" style="font-size:13px">Paste your Supabase project URL and anon key. Find them in your Supabase project → Settings → API. Stored only on this device.</p>
-      <div class="field" style="margin-top:14px"><label>Supabase URL</label><input id="setUrl" placeholder="https://xxxx.supabase.co" /></div>
-      <div class="field"><label>Supabase anon key</label><input id="setKey" placeholder="eyJhbGci…" /></div>
-      <button class="btn" style="width:100%;justify-content:center;padding:12px" onclick="App.saveCreds()">Connect</button>
-    </div>
-  </section>
 
   <section id="tab-shopping" class="tab-panel">
     <div class="panel-head"><h2>Shopping</h2><span class="hint">Tap circle = bought</span></div>
@@ -317,19 +308,26 @@ const App = (() => {
     toast('Opening reminder — tap Add in Calendar');
   }
 
-  /* ---------- supabase ---------- */
+  let sb=null, tab='shopping', period='mid';
+  let activeLoanId = null;
+  let month = new Date().toISOString().slice(0,7); // YYYY-MM
+  
+  // 1. HARDCODE YOUR CREDENTIALS DIRECTLY HERE:
+  const SUPABASE_URL = "https://your-project-id.supabase.co";
+  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...";
+
+  /* ---------- supabase connection ---------- */
   function connect(){
-    const url=localStorage.getItem(LS.url), key=localStorage.getItem(LS.key);
-    if(!url||!key){ $('#setup').style.display='block'; document.querySelectorAll('.tab-panel,nav.tabs,.fab').forEach(e=>e.style.display='none'); return false; }
-    sb = supabase.createClient(url,key);
+    // Instantly initializes using your hardcoded keys above
+    sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     return true;
   }
+  
   function saveCreds(){
-    const u=$('#setUrl').value.trim(), k=$('#setKey').value.trim();
-    if(!u||!k){ toast('Both fields required'); return; }
-    localStorage.setItem(LS.url,u); localStorage.setItem(LS.key,k);
-    location.reload();
+    // Kept as a blank fallback function so your other initializers don't throw errors
+    return true;
   }
+
 
 async function loadAll(){
     $('#syncState').textContent='Syncing…';
