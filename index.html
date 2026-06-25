@@ -186,7 +186,6 @@
 </header>
 
 <main>
-
   <section id="tab-shopping" class="tab-panel">
     <div class="panel-head"><h2>Shopping</h2><span class="hint">Tap circle = bought</span></div>
     <div id="shoppingList"></div>
@@ -308,28 +307,22 @@ const App = (() => {
     toast('Opening reminder — tap Add in Calendar');
   }
 
-  let sb=null, tab='shopping', period='mid';
-  let activeLoanId = null;
-  let month = new Date().toISOString().slice(0,7); // YYYY-MM
-  
   // 1. HARDCODE YOUR CREDENTIALS DIRECTLY HERE:
   const SUPABASE_URL = "https://chkcpdoolfrfjesfkojn.supabase.co";
   const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNoa2NwZG9vbGZyZmplc2Zrb2puIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzODEzNDgsImV4cCI6MjA5Nzk1NzM0OH0.SpJ2LrftcoGoF0VL0DJ9cMCHXHv03qnPj8xB5SvoHOE";
 
   /* ---------- supabase connection ---------- */
   function connect(){
-    // Instantly initializes using your hardcoded keys above
-    sb = supabase.createClient(https://chkcpdoolfrfjesfkojn.supabase.co, eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNoa2NwZG9vbGZyZmplc2Zrb2puIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzODEzNDgsImV4cCI6MjA5Nzk1NzM0OH0.SpJ2LrftcoGoF0VL0DJ9cMCHXHv03qnPj8xB5SvoHOE);
+    // Instantly initializes using your hardcoded string keys above
+    sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     return true;
   }
   
   function saveCreds(){
-    // Kept as a blank fallback function so your other initializers don't throw errors
     return true;
   }
 
-
-async function loadAll(){
+  async function loadAll(){
     $('#syncState').textContent='Syncing…';
     try{
       // settings
@@ -557,7 +550,7 @@ async function loadAll(){
     closeSheet(); renderBudget();
   }
 
-/* ----- Vios (With Automatic Budget Income Sync) ----- */
+  /* ----- Vios (With Automatic Budget Income Sync) ----- */
   function renderVios(){
     const inc=data.vios.filter(v=>v.kind==='income').reduce((s,v)=>s+Number(v.amount||0),0);
     const exp=data.vios.filter(v=>v.kind==='expense').reduce((s,v)=>s+Number(v.amount||0),0);
@@ -652,7 +645,7 @@ async function loadAll(){
     toast('Entry updated & budget synced! 🚗');
   }
 
-/* ----- Loans (Dynamic Revolving Planning Engine) ----- */
+  /* ----- Loans (Dynamic Revolving Planning Engine) ----- */
   const PERIOD_LABEL = p => p==='mid' ? '15th Pay Period' : '30th Pay Period';
   const monthShort = ym => { const [y,m]=ym.split('-'); return new Date(y,m-1,1).toLocaleString(undefined,{month:'short',year:'2-digit'}); };
   const fmtDay = d => d ? new Date(d+'T00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'}) : '—';
@@ -660,20 +653,16 @@ async function loadAll(){
   function periodDueDate(m,p){ const [y,mm]=m.split('-').map(Number); if(p==='mid')return m+'-15'; const last=new Date(y,mm,0).getDate(); return m+'-'+String(Math.min(30,last)).padStart(2,'0'); }
   function sortPeriods(a,b){ const k=x=>x.month+(x.period==='mid'?'1':'2'); return k(a)<k(b)?-1:k(a)>k(b)?1:0; }
 
-function renderLoans(){
+  function renderLoans(){
     const wrap = $('#loanBody');
     if(!data.loans.length){ wrap.innerHTML=emptyState('No loans yet','Add a balance you are paying down. Each pay period it stays due until cleared, and whatever is left rolls into the next period.'); return; }
     
-    // ==========================================
-    // PAGE A: THE MASTER DASHBOARD (All Loans Overview)
-    // ==========================================
+    // PAGE A: DASHBOARD VIEW
     if (!activeLoanId) {
       let html = `<div style="display:grid; grid-template-columns:1fr; gap:14px; margin-top:10px;">`;
-      
       data.loans.forEach(loan => {
         const rows = data.periods.filter(p=>p.loan_id===loan.id).sort(sortPeriods);
         const activePlanCount = rows.filter(p => p.status !== 'paid' && Number(p.planned_payment) > 0).length;
-        
         html += `<div class="card" style="border-left: 6px solid var(--accent); padding:16px; background:var(--card)">
           <div class="row">
             <h3 style="font-size:18px; color:var(--ink)">${esc(loan.name)}</h3>
@@ -682,7 +671,7 @@ function renderLoans(){
           </div>
           <p class="muted" style="font-size:13px; margin:6px 0 14px 0;">
             Installment: <b>${money(loan.installment)}/mo</b> ${loan.notes ? `· ${esc(loan.notes)}` : ''}
-            ${activePlanCount > 0 ? `<br><span style="color:var(--accent)">➔ ${activePlanCount} active pay-period simulations active</span>` : ''}
+            ${activePlanCount > 0 ? `<br><span style="color:var(--accent)">➔ ${activePlanCount} active simulations</span>` : ''}
           </p>
           <div class="row" style="gap:10px;">
             <button class="btn tiny" style="padding:8px 14px; border-radius:10px;" onclick="App.openLoanLedger('${loan.id}')">🔎 Open Planning Ledger</button>
@@ -691,17 +680,14 @@ function renderLoans(){
           </div>
         </div>`;
       });
-      
       html += `</div>`;
       wrap.innerHTML = html;
       return;
     }
 
-    // ==========================================
-    // PAGE B: INDIVIDUAL LEDGER DETAIL WINDOW
-    // ==========================================
+    // PAGE B: LEDGER DETAILED WORKSPACE
     const loan = data.loans.find(l => l.id === activeLoanId);
-    if(!loan) { activeLoanId = null; renderLoans(); return; } // Safety escape fallback
+    if(!loan) { activeLoanId = null; renderLoans(); return; }
 
     const rows = data.periods.filter(p=>p.loan_id===loan.id).sort(sortPeriods);
     let currentRunningBalance = Number(loan.balance || 0);
@@ -772,7 +758,6 @@ function renderLoans(){
         </div>
       </div>`;
     });
-    
     wrap.innerHTML = html;
   }
 
@@ -924,7 +909,8 @@ function renderLoans(){
     if(ex) await del('budget_expenses',ex.id,data.expenses);
     await del('loan_periods',id,data.periods); renderLoans();
   }
- async function delLoan(id){
+
+  async function delLoan(id){
     if(!confirm('Are you absolutely sure you want to completely delete this loan asset and its calculation windows?')) return;
     $('#syncState').textContent='Deleting…';
     try {
@@ -998,9 +984,8 @@ function renderLoans(){
   /* ----- FAB router ----- */
   function fab(){ ({shopping:shopForm,budget:expenseForm,vios:viosForm,loans:loanForm}[tab]||(()=>{}))(); }
 
- /* ----- init ----- */
+  /* ----- init ----- */
   function init(){
-    // Clear old memory keys so it has to use your new hardcoded ones
     localStorage.removeItem('lh_url');
     localStorage.removeItem('lh_key');
 
@@ -1013,7 +998,7 @@ function renderLoans(){
     toggleShop, delShop, shopForm, addShop,
     setPeriod, shiftMonth, renderBudget, incomeForm, saveIncome, delInc,
     expenseForm, addExp, toggleExp, delExp,
-   viosForm, addVios, delVios, editViosForm, saveViosEdits,
+    viosForm, addVios, delVios, editViosForm, saveViosEdits,
     loanForm, addLoan, delLoan, planForm, savePlan, payForm, confirmPay, unpayPeriod, delPeriod, remindLoan,
     extendNextPeriod,
     editLoanSettingsForm, saveLoanSettings,
