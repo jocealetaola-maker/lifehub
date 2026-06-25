@@ -592,8 +592,8 @@ async function loadAll(){
     closeSheet(); renderVios();
   }
 
-  /* ----- Loans (revolving balance, by pay period) ----- */
-  const PERIOD_LABEL = p => p==='mid' ? '15th' : '30th';
+/* ----- Loans (Dynamic Revolving Planning Engine) ----- */
+  const PERIOD_LABEL = p => p==='mid' ? '15th Pay Period' : '30th Pay Period';
   const monthShort = ym => { const [y,m]=ym.split('-'); return new Date(y,m-1,1).toLocaleString(undefined,{month:'short',year:'2-digit'}); };
   const fmtDay = d => d ? new Date(d+'T00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'}) : '—';
   function nextPeriod(m,p){ if(p==='mid')return{month:m,period:'end'}; const d=new Date(m+'-01'); d.setMonth(d.getMonth()+1); return{month:d.toISOString().slice(0,7),period:'mid'}; }
@@ -603,33 +603,77 @@ async function loadAll(){
   function renderLoans(){
     if(!data.loans.length){ $('#loanBody').innerHTML=emptyState('No loans yet','Add a balance you are paying down. Each pay period it stays due until cleared, and whatever is left rolls into the next period.'); return; }
     let html='';
+    
     data.loans.forEach(loan=>{
-      const rows=data.periods.filter(p=>p.loan_id===loan.id).sort(sortPeriods);
-      html+=`<div class="card">
-        <div class="row"><h3 style="font-size:16px">${esc(loan.name)}</h3><div class="spacer"></div>
-          <span class="pill ${Number(loan.balance)>0?'warn':'good'}">Balance ${money(loan.balance)}</span></div>
-        ${loan.notes?`<div class="muted" style="font-size:12px;margin-top:4px">${esc(loan.notes)}</div>`:''}
-        <div class="row" style="margin-top:8px"><button class="btn line tiny" onclick="App.delLoan('${loan.id}')">Delete loan</button></div>`;
-      rows.forEach(p=>{
-        const overdue=p.status!=='paid'&&p.due_date&&p.due_date<todayStr();
-        const cls=p.status==='paid'?'good':overdue?'bad':'gray';
-        const lbl=p.status==='paid'?'Paid':overdue?'Overdue':'Planned';
-        html+=`<div style="border:1px solid var(--line);border-radius:12px;padding:11px;margin-top:10px">
-          <div class="row"><b>${monthShort(p.month)} · ${PERIOD_LABEL(p.period)}</b>
-            <span class="pill ${cls}" style="margin-left:8px">${lbl}</span><div class="spacer"></div>
-            <span class="muted" style="font-size:12px">Due ${fmtDay(p.due_date)}</span></div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;margin-top:9px;font-size:13px">
-            <div class="row"><span class="muted">Due this period</span><div class="spacer"></div><b>${money(p.due_amount)}</b></div>
-            <div class="row"><span class="muted">Planned</span><div class="spacer"></div><b>${money(p.planned_payment)}</b></div>
-            <div class="row"><span class="muted">Paid</span><div class="spacer"></div><b>${money(p.paid_amount)}</b></div>
-            <div class="row"><span class="muted">Balance after</span><div class="spacer"></div><b style="color:${Number(p.balance_after)>0?'var(--warn)':'var(--good)'}">${money(p.balance_after)}</b></div>
+      const rows = data.periods.filter(p=>p.loan_id===loan.id).sort(sortPeriods);
+      
+      // We will dynamically compute the running balances downstream 
+      let currentRunningBalance = Number(loan.balance || 0);
+
+      html+=`<div class="card" style="margin-bottom: 20px;">
+        <div class="row">
+          <h3 style="font-size:18px; color:var(--ink)">${esc(loan.name)}</h3>
+          <div class="spacer"></div>
+          <span class="pill warn" style="font-size:13px; padding:6px 12px">Current Base Balance: ${money(loan.balance)}</span>
+        </div>
+        <div class="muted" style="font-size:12px; margin-top:4px; margin-bottom:12px;">
+          Default Monthly Installment: <b>${money(loan.installment)}</b> ${loan.notes ? `· ${esc(loan.notes)}` : ''}
+        </div>`;
+
+      rows.forEach((p, index) => {
+        // --- LIVE MATH WATERFALL ENGINE ---
+        // If this is an end-of-month period, the fresh monthly installment (e.g. 28k) is added to the balance stack
+        let addedInstallment = 0;
+        if (p.period === 'end') {
+          addedInstallment = Number(loan.installment || 0);
+        }
+
+        const startingBalanceThisPeriod = currentRunningBalance;
+        const totalStackedDue = startingBalanceThisPeriod + addedInstallment;
+        
+        // Use paid amount if locked in, otherwise subtract your planned allocation dynamically!
+        const effectivePayment = p.status === 'paid' ? Number(p.paid_amount || 0) : Number(p.planned_payment || 0);
+        const projectedBalanceAfter = Math.max(0, totalStackedDue - effectivePayment);
+        
+        // Pass this computed balance down to the next period in the loop chain
+        currentRunningBalance = projectedBalanceAfter;
+
+        const overdue = p.status !== 'paid' && p.due_date && p.due_date < todayStr();
+        const cls = p.status === 'paid' ? 'good' : effectivePayment > 0 ? 'warn' : 'gray';
+        const lbl = p.status === 'paid' ? 'Paid' : effectivePayment > 0 ? 'Simulated Plan' : 'Unplanned';
+
+        html+=`<div style="border:1px solid var(--line); border-radius:12px; padding:14px; margin-top:12px; background:var(--bg)">
+          <div class="row">
+            <b style="font-size:14px">${monthShort(p.month)} · ${PERIOD_LABEL(p.period)}</b>
+            <span class="pill ${cls}" style="margin-left:8px">${lbl}</span>
+            <div class="spacer"></div>
+            <span class="muted" style="font-size:12px">Due Target: ${fmtDay(p.due_date)}</span>
           </div>
-          <div class="row" style="gap:6px;margin-top:10px;flex-wrap:wrap">
-            ${p.status!=='paid'
-              ? `<button class="btn ghost tiny" onclick="App.planForm('${p.id}')">Set planned</button><button class="btn tiny" onclick="App.payForm('${p.id}')">Record payment</button>`
-              : `<button class="btn line tiny" onclick="App.unpayPeriod('${p.id}')">Undo payment</button>`}
+          
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px 24px; margin-top:12px; font-size:13px; border-top:1px dashed var(--line); padding-top:12px;">
+            <div class="row"><span class="muted">Starting Balance:</span><div class="spacer"></div><span>${money(startingBalanceThisPeriod)}</span></div>
+            <div class="row"><span class="muted">New Monthly Accrual:</span><div class="spacer"></div><span style="color:${addedInstallment > 0 ? 'var(--warn)' : 'var(--muted)'}">+ ${money(addedInstallment)}</span></div>
+            <div class="row" style="grid-column: 1 / -1; background:var(--card); padding:6px 10px; border-radius:8px; border:1px solid var(--line)">
+              <span class="muted"><b>Total Due This Window:</b></span><div class="spacer"></div><b>${money(totalStackedDue)}</b>
+            </div>
+            <div class="row"><span class="muted">Your Plan Allocation:</span><div class="spacer"></div><b style="color:var(--accent)">${money(p.planned_payment)}</b></div>
+            <div class="row"><span class="muted">Actual Paid:</span><div class="spacer"></div><b style="color:var(--good)">${money(p.paid_amount)}</b></div>
+          </div>
+
+          <div class="row" style="margin-top:14px; background:var(--card); padding:8px 12px; border-radius:8px; border:1px solid var(--line)">
+            <span class="muted"><b>Projected Balance After:</b></span>
+            <div class="spacer"></div>
+            <b style="font-size:15px; color:${projectedBalanceAfter > 0 ? 'var(--warn)' : 'var(--good)'}">${money(projectedBalanceAfter)}</b>
+          </div>
+
+          <div class="row" style="gap:6px; margin-top:12px; flex-wrap:wrap">
+            ${p.status !== 'paid'
+              ? `<button class="btn ghost tiny" onclick="App.planForm('${p.id}')">✏️ Set/Edit Plan</button>
+                 <button class="btn tiny" onclick="App.payForm('${p.id}', ${totalStackedDue})">✅ Log Payment</button>`
+              : `<button class="btn line tiny" onclick="App.unpayPeriod('${p.id}')">↩️ Undo Payment</button>`}
             <button class="btn line tiny" onclick="App.remindLoan('${p.id}')">🔔 Remind</button>
-            <button class="btn line tiny" onclick="App.delPeriod('${p.id}')">Remove</button>
+            ${index === rows.length - 1 ? `<button class="btn line tiny" onclick="App.extendNextPeriod('${loan.id}', '${p.month}', '${p.period}')">➕ Map Next Period</button>` : ''}
+            <button class="btn line tiny" style="color:var(--bad)" onclick="App.delPeriod('${p.id}')">✕ Remove</button>
           </div>
         </div>`;
       });
@@ -651,16 +695,17 @@ async function loadAll(){
 
   function loanForm(){
     const m=new Date().toISOString().slice(0,7);
-    openSheet(`<h3>New loan / balance</h3>
-      <div class="field"><label>Name</label><input id="f_name" placeholder="e.g. Vios amortization" /></div>
-      <div class="field two"><div><label>Current balance</label><input id="f_bal" type="number" inputmode="decimal" placeholder="0" /></div>
-      <div><label>Usual payment / period</label><input id="f_pay" type="number" inputmode="decimal" placeholder="0" /></div></div>
-      <div class="field two"><div><label>Start month</label><input id="f_month" type="month" value="${m}" /></div>
-      <div><label>Start period</label><select id="f_per"><option value="mid">15th</option><option value="end">30th</option></select></div></div>
-      <div class="field"><label>Notes</label><input id="f_notes" placeholder="lender, term, etc." /></div>
+    openSheet(`<h3>New Loan / Vehicle Amortization</h3>
+      <div class="field"><label>Name</label><input id="f_name" placeholder="e.g. Montero / Livina Amortization" /></div>
+      <div class="field two"><div><label>Current Overdue / Base Balance</label><input id="f_bal" type="number" inputmode="decimal" placeholder="0" /></div>
+      <div><label>Default Fixed Installment / Month</label><input id="f_pay" type="number" inputmode="decimal" placeholder="0" /></div></div>
+      <div class="field two"><div><label>Start Month</label><input id="f_month" type="month" value="${m}" /></div>
+      <div><label>Start Pay Window</label><select id="f_per"><option value="mid">15th window</option><option value="end">30th window</option></select></div></div>
+      <div class="field"><label>Notes</label><input id="f_notes" placeholder="e.g. Bank financing, due every 21st" /></div>
       <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.addLoan()">Add</button></div>`);
     setTimeout(()=>$('#f_name').focus(),100);
   }
+
   async function addLoan(){
     const name=$('#f_name').value.trim(); if(!name){toast('Name needed');return;}
     const bal=parseFloat($('#f_bal').value)||0, pay=parseFloat($('#f_pay').value)||0;
@@ -668,19 +713,20 @@ async function loadAll(){
     const loan=await ins('loans',{name,balance:bal,installment:pay,notes:$('#f_notes').value.trim()},data.loans);
     if(!loan)return;
     const lp=await ins('loan_periods',{loan_id:loan.id,month:m,period:per,due_date:periodDueDate(m,per),
-      due_amount:bal,planned_payment:Math.min(pay||bal,bal),paid_amount:0,status:'planned',balance_after:bal},data.periods);
+      due_amount:bal,planned_payment:0,paid_amount:0,status:'planned',balance_after:bal},data.periods);
     if(lp) await syncLoanToBudget(lp,loan);
     closeSheet(); renderLoans();
   }
 
   function planForm(id){
     const p=data.periods.find(x=>x.id===id);
-    openSheet(`<h3>Planned payment</h3>
-      <p class="muted" style="font-size:13px">Due this period: <b>${money(p.due_amount)}</b>. Plan a full or partial amount — the rest rolls to the next pay period.</p>
-      <div class="field"><label>Planned payment</label><input id="f_plan" type="number" inputmode="decimal" value="${p.planned_payment||''}" placeholder="0" /></div>
-      <div class="field"><label>Due date</label><input id="f_date" type="date" value="${p.due_date||''}" /></div>
-      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.savePlan('${id}')">Save & sync to budget</button></div>`);
+    openSheet(`<h3>Simulate Planned Payment</h3>
+      <p class="muted" style="font-size:13px">Type what you intend to pay during this cycle. The waterfall down below will adjust calculations automatically.</p>
+      <div class="field"><label>Planned Payment Allocation (₱)</label><input id="f_plan" type="number" inputmode="decimal" value="${p.planned_payment||''}" placeholder="0" /></div>
+      <div class="field"><label>Target Payment Date</label><input id="f_date" type="date" value="${p.due_date||''}" /></div>
+      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.savePlan('${id}')">Save & Update Waterfall</button></div>`);
   }
+
   async function savePlan(id){
     const p=data.periods.find(x=>x.id===id), loan=data.loans.find(l=>l.id===p.loan_id);
     const plan=parseFloat($('#f_plan').value)||0, dd=$('#f_date').value||p.due_date;
@@ -689,42 +735,63 @@ async function loadAll(){
     closeSheet(); renderLoans();
   }
 
-  function payForm(id){
+  function payForm(id, computedDue){
     const p=data.periods.find(x=>x.id===id);
-    openSheet(`<h3>Record payment</h3>
-      <p class="muted" style="font-size:13px">Due this period: <b>${money(p.due_amount)}</b></p>
-      <div class="field"><label>Amount paid</label><input id="f_paid" type="number" inputmode="decimal" value="${p.planned_payment||p.due_amount||''}" /></div>
-      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.confirmPay('${id}')">Mark paid</button></div>`);
+    openSheet(`<h3>Record Actual Payment</h3>
+      <p class="muted" style="font-size:13px">Locking this payment will adjust the true underlying base balance of the loan asset.</p>
+      <div class="field"><label>Amount Paid (₱)</label><input id="f_paid" type="number" inputmode="decimal" value="${p.planned_payment||computedDue||''}" /></div>
+      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.confirmPay('${id}')">Lock & Mark Paid</button></div>`);
   }
+
   async function confirmPay(id){
     const p=data.periods.find(x=>x.id===id), loan=data.loans.find(l=>l.id===p.loan_id);
-    const paid=parseFloat($('#f_paid').value)||0, after=Math.max(0,Number(p.due_amount)-paid);
-    await upd('loan_periods',id,{paid_amount:paid,status:'paid',balance_after:after},data.periods);
-    await upd('loans',loan.id,{balance:after},data.loans);
+    const paid=parseFloat($('#f_paid').value)||0;
+    
+    // Compute true dynamic baseline deduction
+    let monthlyInstallmentImpact = p.period === 'end' ? Number(loan.installment || 0) : 0;
+    const trueCurrentAssetDue = Number(loan.balance) + monthlyInstallmentImpact;
+    const remainingAssetBalance = Math.max(0, trueCurrentAssetDue - paid);
+
+    await upd('loan_periods',id,{paid_amount:paid,status:'paid',balance_after:remainingAssetBalance},data.periods);
+    await upd('loans',loan.id,{balance:remainingAssetBalance},data.loans);
     await syncLoanToBudget(data.periods.find(x=>x.id===id),loan);
-    if(after>0){
-      const np=nextPeriod(p.month,p.period);
-      const exists=data.periods.some(x=>x.loan_id===loan.id&&x.month===np.month&&x.period===np.period);
-      if(!exists){
-        const nlp=await ins('loan_periods',{loan_id:loan.id,month:np.month,period:np.period,due_date:periodDueDate(np.month,np.period),
-          due_amount:after,planned_payment:Math.min((loan.installment||after),after),paid_amount:0,status:'planned',balance_after:after},data.periods);
-        if(nlp) await syncLoanToBudget(nlp,loan);
-      }
-    }
+    
     closeSheet(); renderLoans();
-    toast(after>0?('Paid — '+money(after)+' rolled to next period'):'Paid — balance cleared 🎉');
+    toast(remainingAssetBalance > 0 ? 'Payment locked — calculation waterfall shifted!' : 'Loan completely cleared! 🎉');
   }
+
   async function unpayPeriod(id){
     const p=data.periods.find(x=>x.id===id), loan=data.loans.find(l=>l.id===p.loan_id);
-    const restored=Number(loan.balance)+Number(p.paid_amount);
-    await upd('loan_periods',id,{paid_amount:0,status:'planned',balance_after:p.due_amount},data.periods);
-    await upd('loans',loan.id,{balance:restored},data.loans);
+    let monthlyInstallmentImpact = p.period === 'end' ? Number(loan.installment || 0) : 0;
+    const restored = Number(loan.balance) + Number(p.paid_amount) - monthlyInstallmentImpact;
+    await upd('loan_periods',id,{paid_amount:0,status:'planned',balance_after:restored},data.periods);
+    await upd('loans',loan.id,{balance:Math.max(0, restored)},data.loans);
     await syncLoanToBudget(data.periods.find(x=>x.id===id),loan);
     renderLoans();
   }
+
+  async function extendNextPeriod(loanId, currentMonth, currentPeriod){
+    const np = nextPeriod(currentMonth, currentPeriod);
+    const exists = data.periods.some(x=>x.loan_id===loanId && x.month===np.month && x.period===np.period);
+    if(exists){ toast('Next period already mapped out below!'); return; }
+    
+    const nlp = await ins('loan_periods',{
+      loan_id: loanId, month: np.month, period: np.period,
+      due_date: periodDueDate(np.month, np.period), due_amount: 0,
+      planned_payment: 0, paid_amount: 0, status: 'planned', balance_after: 0
+    }, data.periods);
+    
+    if(nlp) {
+      const loan = data.loans.find(l=>l.id===loanId);
+      await syncLoanToBudget(nlp, loan);
+    }
+    renderLoans();
+    toast('Next future window generated!');
+  }
+
   function remindLoan(id){
     const p=data.periods.find(x=>x.id===id), loan=data.loans.find(l=>l.id===p.loan_id);
-    downloadICS(loan.name+' payment', p.due_date, '09:00', 'Due this period: '+money(p.due_amount)+' · Planned: '+money(p.planned_payment));
+    downloadICS(loan.name+' Payment Due', p.due_date, '09:00', 'Simulated Plan Target: '+money(p.planned_payment));
   }
   async function delPeriod(id){
     const ex=data.expenses.find(e=>e.source==='loan'&&e.source_id===id);
@@ -732,7 +799,7 @@ async function loadAll(){
     await del('loan_periods',id,data.periods); renderLoans();
   }
   async function delLoan(id){
-    if(!confirm('Delete this loan, its periods, and its synced budget items?'))return;
+    if(!confirm('Delete this loan entirely?'))return;
     const ids=data.periods.filter(p=>p.loan_id===id).map(p=>p.id);
     for(const e of data.expenses.filter(e=>e.source==='loan'&&ids.includes(e.source_id))) await del('budget_expenses',e.id,data.expenses);
     await sb.from('loan_periods').delete().eq('loan_id',id);
@@ -809,6 +876,7 @@ async function loadAll(){
     expenseForm, addExp, toggleExp, delExp,
     viosForm, addVios, delVios,
     loanForm, addLoan, delLoan, planForm, savePlan, payForm, confirmPay, unpayPeriod, delPeriod, remindLoan,
+    extendNextPeriod,
     setOpt, addCat, removeCat, delRecurring, resetCreds };
 })();
 document.addEventListener('DOMContentLoaded', App.init);
