@@ -559,13 +559,13 @@ async function loadAll(){
     closeSheet(); renderBudget();
   }
 
-  /* ----- Vios ----- */
+/* ----- Vios (With Automatic Budget Income Sync) ----- */
   function renderVios(){
     const inc=data.vios.filter(v=>v.kind==='income').reduce((s,v)=>s+Number(v.amount||0),0);
     const exp=data.vios.filter(v=>v.kind==='expense').reduce((s,v)=>s+Number(v.amount||0),0);
-    let html=`<div class="summary"><div class="stat big ${inc-exp<0?'bad':'good'}"><div class="k">Net</div><div class="v">${money(inc-exp)}</div></div>
-      <div class="stat"><div class="k">Income</div><div class="v">${money(inc)}</div></div>
-      <div class="stat"><div class="k">Costs</div><div class="v">${money(exp)}</div></div></div>`;
+    let html=`<div class="summary"><div class="stat big ${inc-exp<0?'bad':'good'}"><div class="k">Net Vios Cashflow</div><div class="v">${money(inc-exp)}</div></div>
+      <div class="stat"><div class="k">Total Income</div><div class="v">${money(inc)}</div></div>
+      <div class="stat"><div class="k">Total Costs</div><div class="v">${money(exp)}</div></div></div>`;
     if(!data.vios.length){ html+=emptyState('No Vios entries','Log rental income and any costs (fuel, maintenance, insurance)'); }
     else{
       html+='<div class="group-title">Entries</div><div class="card">';
@@ -573,25 +573,85 @@ async function loadAll(){
         html+=`<div class="item"><div class="body"><div class="title">${esc(v.description||(v.kind==='income'?'Rental income':'Cost'))}</div>
           <div class="meta">${new Date(v.date+'T00:00').toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}</div></div>
           <div class="amt" style="font-weight:700;color:${v.kind==='income'?'var(--good)':'var(--bad)'}">${v.kind==='income'?'+':'−'}${money(v.amount)}</div>
-          <button class="icon-btn del" style="margin-left:8px" onclick="App.delVios('${v.id}')">✕</button></div>`;
+          <button class="icon-btn" style="margin-left:8px" onclick="App.editViosForm('${v.id}')">✏️</button>
+          <button class="icon-btn del" style="margin-left:6px" onclick="App.delVios('${v.id}')">✕</button></div>`;
       });
       html+='</div>';
     }
     $('#viosBody').innerHTML=html;
   }
-  async function delVios(id){ await del('vios_entries',id,data.vios); renderVios(); }
-  function viosForm(){
-    openSheet(`<h3>Vios entry</h3>
-      <div class="field"><label>Type</label><select id="f_kind"><option value="income">Income (rental received)</option><option value="expense">Cost (fuel, repair, etc.)</option></select></div>
-      <div class="field"><label>Description</label><input id="f_desc" placeholder="e.g. Weekly rental — Mr. Cruz" /></div>
-      <div class="field two"><div><label>Amount</label><input id="f_amt" type="number" inputmode="decimal" placeholder="0" /></div>
-      <div><label>Date</label><input id="f_date" type="date" value="${todayStr()}" /></div></div>
-      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.addVios()">Add</button></div>`);
+
+  // Sync Vios Rental Income to Budget 15th period automatically
+  async function syncViosToBudgetIncome(viosEntry) {
+    const targetMonth = viosEntry.date.slice(0, 7); // Pulls YYYY-MM from date string
+    
+    // Look for an existing budget entry tied to this specific Vios log
+    const existing = data.incomes.find(i => i.source === 'vios' && i.source_id === viosEntry.id);
+    
+    if (viosEntry.kind !== 'income' || Number(viosEntry.amount) <= 0) {
+      if (existing) await del('budget_incomes', existing.id, data.incomes);
+      return;
+    }
+
+    const payload = {
+      month: targetMonth,
+      period: 'mid', // Hardcoded directly to your 15th Pay Period
+      amount: Number(viosEntry.amount),
+      label: `🚗 Vios Rental: ${viosEntry.description || 'Income'}`,
+      source: 'vios',
+      source_id: viosEntry.id
+    };
+
+    if (existing) {
+      await upd('budget_incomes', existing.id, payload, data.incomes);
+    } else {
+      await ins('budget_incomes', payload, data.incomes);
+    }
   }
+
+  async function delVios(id){ 
+    const existingBudget = data.incomes.find(i => i.source === 'vios' && i.source_id === id);
+    if(existingBudget) await del('budget_incomes', existingBudget.id, data.incomes);
+    await del('vios_entries',id,data.vios); 
+    renderVios(); 
+  }
+
+  function viosForm(){
+    openSheet(`<h3>New Vios Entry</h3>
+      <div class="field"><label>Type</label><select id="f_kind"><option value="income">Income (Rental Received)</option><option value="expense">Cost (Fuel, Repair, Maintenance)</option></select></div>
+      <div class="field"><label>Description</label><input id="f_desc" placeholder="e.g. Weekly rental — Mr. Cruz" /></div>
+      <div class="field two"><div><label>Amount (₱)</label><input id="f_amt" type="number" inputmode="decimal" placeholder="0" /></div>
+      <div><label>Date</label><input id="f_date" type="date" value="${todayStr()}" /></div></div>
+      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.addVios()">Add & Sync</button></div>`);
+  }
+
   async function addVios(){
     const amt=parseFloat($('#f_amt').value)||0; if(!amt){toast('Amount needed');return;}
-    await ins('vios_entries',{kind:$('#f_kind').value,description:$('#f_desc').value.trim(),amount:amt,date:$('#f_date').value||todayStr()},data.vios);
+    const row = await ins('vios_entries',{kind:$('#f_kind').value,description:$('#f_desc').value.trim(),amount:amt,date:$('#f_date').value||todayStr()},data.vios);
+    if(row) await syncViosToBudgetIncome(row);
     closeSheet(); renderVios();
+  }
+
+  function editViosForm(id) {
+    const v = data.vios.find(x => x.id === id);
+    openSheet(`<h3>Edit Vios Entry</h3>
+      <div class="field"><label>Type</label><select id="e_kind"><option value="income" ${v.kind==='income'?'selected':''}>Income (Rental Received)</option><option value="expense" ${v.kind==='expense'?'selected':''}>Cost (Fuel, Repair, Maintenance)</option></select></div>
+      <div class="field"><label>Description</label><input id="e_desc" value="${esc(v.description)}" /></div>
+      <div class="field two"><div><label>Amount (₱)</label><input id="e_amt" type="number" inputmode="decimal" value="${v.amount}" /></div>
+      <div><label>Date</label><input id="e_date" type="date" value="${v.date}" /></div></div>
+      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.saveViosEdits('${id}')">Save Changes</button></div>`);
+  }
+
+  async function saveViosEdits(id) {
+    const amt = parseFloat($('#e_amt').value) || 0; if(!amt){toast('Amount needed');return;}
+    const patch = { kind: $('#e_kind').value, description: $('#e_desc').value.trim(), amount: amt, date: $('#e_date').value };
+    
+    await upd('vios_entries', id, patch, data.vios);
+    const updatedRow = data.vios.find(x => x.id === id);
+    if(updatedRow) await syncViosToBudgetIncome(updatedRow);
+    
+    closeSheet(); renderVios();
+    toast('Entry updated & budget synced! 🚗');
   }
 
 /* ----- Loans (Dynamic Revolving Planning Engine) ----- */
@@ -951,7 +1011,7 @@ function renderLoans(){
     toggleShop, delShop, shopForm, addShop,
     setPeriod, shiftMonth, renderBudget, incomeForm, saveIncome, delInc,
     expenseForm, addExp, toggleExp, delExp,
-    viosForm, addVios, delVios,
+   viosForm, addVios, delVios, editViosForm, saveViosEdits,
     loanForm, addLoan, delLoan, planForm, savePlan, payForm, confirmPay, unpayPeriod, delPeriod, remindLoan,
     extendNextPeriod,
     editLoanSettingsForm, saveLoanSettings,
