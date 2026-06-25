@@ -274,7 +274,7 @@ const App = (() => {
   };
   let S = {...DEFAULTS};
 
-  const data = { shopping:[], todos:[], incomes:[], expenses:[], recurring:[], vios:[], loans:[], payments:[] };
+  const data = { shopping:[], todos:[], incomes:[], expenses:[], recurring:[], vios:[], loans:[], payments:[], periods:[] };
 
   /* ---------- helpers ---------- */
   const $ = s => document.querySelector(s);
@@ -306,7 +306,7 @@ const App = (() => {
   }
 
   /* ---------- ICS reminder ---------- */
-  function downloadICS(title, dateStr, timeStr, notes){
+ function downloadICS(title, dateStr, timeStr, notes){
     if(!dateStr){ toast('Add a due date first'); return; }
     const dt = new Date(`${dateStr}T${timeStr||'09:00'}:00`);
     const stamp = d => d.toISOString().replace(/[-:]/g,'').slice(0,15)+'Z';
@@ -315,14 +315,19 @@ const App = (() => {
       'BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//LifeHub//EN','CALSCALE:GREGORIAN',
       'BEGIN:VEVENT','UID:'+Date.now()+'@lifehub',
       'DTSTAMP:'+stamp(new Date()),'DTSTART:'+stamp(dt),'DTEND:'+stamp(end),
-      'SUMMARY:'+(title||'Reminder'), notes?('DESCRIPTION:'+notes.replace(/\n/g,'\\n')):'',
+      'SUMMARY:'+(title||'Reminder'), notes?('DESCRIPTION:'+String(notes).replace(/\n/g,'\\n')):'',
       'BEGIN:VALARM','ACTION:DISPLAY','DESCRIPTION:'+(title||'Reminder'),'TRIGGER:-PT0M','END:VALARM',
       'END:VEVENT','END:VCALENDAR'
     ].filter(Boolean).join('\r\n');
-    const blob=new Blob([ics],{type:'text/calendar'});
-    const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-    a.download=(title||'reminder').replace(/[^a-z0-9]/gi,'_').slice(0,30)+'.ics';
-    document.body.appendChild(a); a.click(); a.remove();
+    const dataUri = 'data:text/calendar;charset=utf-8,' + encodeURIComponent(ics);
+    const isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+    if(isiOS){
+      window.location.href = dataUri;   // iOS opens the Add-to-Calendar sheet
+    } else {
+      const a=document.createElement('a'); a.href=dataUri;
+      a.download=(title||'reminder').replace(/[^a-z0-9]/gi,'_').slice(0,30)+'.ics';
+      document.body.appendChild(a); a.click(); a.remove();
+    }
     toast('Opening reminder — tap Add in Calendar');
   }
 
@@ -357,7 +362,7 @@ const App = (() => {
       data.recurring= await grab('recurring_expenses','created_at');
       data.vios     = await grab('vios_entries','date');
       data.loans    = await grab('loans','created_at');
-      data.payments = await grab('loan_payments','due_date');
+      data.payments = await grab('loan_payments','month');
 
       await autoLogRecurring();
       $('#syncState').textContent='Synced ✓';
@@ -514,39 +519,37 @@ const App = (() => {
   function shiftMonth(d){ const dt=new Date(month+'-01'); dt.setMonth(dt.getMonth()+d); month=dt.toISOString().slice(0,7); autoLogRecurring().then(renderBudget); }
   function periodsActive(){ return period==='both'?['mid','end']:[period]; }
 
-  function renderBudget(){
+function renderBudget(){
     $('#monthLabel').textContent=monthName(month);
-    $('#budgetHint').textContent = `Pay: ${S.payMid}th & ${S.payEnd}th`;
+    $('#budgetHint').textContent = 'Pay periods: 15th & 30th';
     const ps=periodsActive();
-    const exps=data.expenses.filter(e=>e.month===month && ps.includes(e.period));
-    const incs=data.incomes.filter(i=>i.month===month && ps.includes(i.period));
-    const income=incs.reduce((s,i)=>s+Number(i.amount||0),0);
-    const planned=exps.filter(e=>e.status==='planned'), paid=exps.filter(e=>e.status==='paid');
-    const sumPlanned=planned.reduce((s,e)=>s+Number(e.amount||0),0);
-    const sumPaid=paid.reduce((s,e)=>s+Number(e.amount||0),0);
-    const remaining=income-sumPaid-sumPlanned;
-    const savings=Math.max(0, remaining*(S.savingsPct/100));
-
-    let html='';
-    // income editor
-    html+=`<div class="card"><div class="row"><h3 style="font-size:15px">Income</h3><div class="spacer"></div><button class="btn ghost tiny" onclick="App.incomeForm()">Set income</button></div>`;
-    if(incs.length){ html+='<div style="margin-top:8px">'; incs.forEach(i=>{
-      html+=`<div class="exp"><span class="nm">${i.period==='mid'?'Mid-month':'End-month'}${i.label?(' · '+esc(i.label)):''}</span><span class="amt">${money(i.amount)}</span>
-        <button class="icon-btn del" style="margin-left:8px" onclick="App.delInc('${i.id}')">✕</button></div>`;
-    }); html+='</div>'; } else html+='<p class="muted" style="font-size:13px;margin-top:6px">No income set for this period yet.</p>';
-    html+='</div>';
-
-    // summary
-    html+=`<div class="summary">
-      <div class="stat big ${remaining<0?'bad':'good'}"><div class="k">Remaining after planned + paid</div><div class="v">${money(remaining)}</div></div>
-      <div class="stat"><div class="k">Income</div><div class="v">${money(income)}</div></div>
-      <div class="stat"><div class="k">Paid</div><div class="v">${money(sumPaid)}</div></div>
-      <div class="stat"><div class="k">Planned</div><div class="v">${money(sumPlanned)}</div></div>
-      <div class="stat good"><div class="k">Suggested savings (${S.savingsPct}%)</div><div class="v">${money(savings)}</div></div>
-    </div>`;
-
-    html+=groupBlock('Planned', planned, 'planned');
-    html+=groupBlock('Paid', paid, 'paid');
+    let html='', totIncome=0, totPaid=0, totPlanned=0;
+    ps.forEach(per=>{
+      const exps=data.expenses.filter(e=>e.month===month && e.period===per);
+      const incs=data.incomes.filter(i=>i.month===month && i.period===per);
+      const income=incs.reduce((s,i)=>s+Number(i.amount||0),0);
+      const planned=exps.filter(e=>e.status==='planned'), paid=exps.filter(e=>e.status==='paid');
+      const sumPlanned=planned.reduce((s,e)=>s+Number(e.amount||0),0);
+      const sumPaid=paid.reduce((s,e)=>s+Number(e.amount||0),0);
+      const remaining=income-sumPaid-sumPlanned;
+      totIncome+=income; totPaid+=sumPaid; totPlanned+=sumPlanned;
+      html+=`<div class="group-title" style="font-size:15px;color:var(--ink);margin-top:20px">
+          ${per==='mid'?'15th · Mid-month':'30th · End-month'} <span class="count">${money(income)} in</span></div>
+        <div class="card"><div class="row"><span class="muted" style="font-size:13px">Income for this period</span><div class="spacer"></div>
+          <b>${money(income)}</b><button class="btn ghost tiny" style="margin-left:8px" onclick="App.incomeForm()">Set</button></div></div>
+        ${groupBlock('Planned', planned, 'planned')}
+        ${groupBlock('Paid', paid, 'paid')}
+        <div class="summary" style="margin-top:10px"><div class="stat big ${remaining<0?'bad':'good'}">
+          <div class="k">Left this period</div><div class="v">${money(remaining)}</div></div></div>`;
+    });
+    const allRemaining=totIncome-totPaid-totPlanned;
+    const savings=Math.max(0, allRemaining*(S.savingsPct/100));
+    html = `<div class="summary">
+        <div class="stat big ${allRemaining<0?'bad':'good'}"><div class="k">Remaining this month</div><div class="v">${money(allRemaining)}</div></div>
+        <div class="stat"><div class="k">Income</div><div class="v">${money(totIncome)}</div></div>
+        <div class="stat"><div class="k">Paid + planned</div><div class="v">${money(totPaid+totPlanned)}</div></div>
+        <div class="stat good"><div class="k">Suggested savings (${S.savingsPct}%)</div><div class="v">${money(savings)}</div></div>
+      </div>` + html;
     $('#budgetBody').innerHTML=html;
   }
   function groupBlock(title, list, status){
@@ -649,95 +652,152 @@ const App = (() => {
     closeSheet(); renderVios();
   }
 
-  /* ----- Loans ----- */
+/* ----- Loans (revolving balance, by pay period) ----- */
+  const PERIOD_LABEL = p => p==='mid' ? '15th' : '30th';
+  const monthShort = ym => { const [y,m]=ym.split('-'); return new Date(y,m-1,1).toLocaleString(undefined,{month:'short',year:'2-digit'}); };
+  const fmtDay = d => d ? new Date(d+'T00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'}) : '—';
+  function nextPeriod(m,p){ if(p==='mid')return{month:m,period:'end'}; const d=new Date(m+'-01'); d.setMonth(d.getMonth()+1); return{month:d.toISOString().slice(0,7),period:'mid'}; }
+  function periodDueDate(m,p){ const [y,mm]=m.split('-').map(Number); if(p==='mid')return m+'-15'; const last=new Date(y,mm,0).getDate(); return m+'-'+String(Math.min(30,last)).padStart(2,'0'); }
+  function sortPeriods(a,b){ const k=x=>x.month+(x.period==='mid'?'1':'2'); return k(a)<k(b)?-1:k(a)>k(b)?1:0; }
+
   function renderLoans(){
-    if(!data.loans.length){ $('#loanBody').innerHTML=emptyState('No long-term payments','Add a loan or amortization (e.g. car) with its balance, then schedule payments'); return; }
+    if(!data.loans.length){ $('#loanBody').innerHTML=emptyState('No loans yet','Add a balance you are paying down. Each pay period it stays due until cleared, and whatever is left rolls into the next period.'); return; }
     let html='';
     data.loans.forEach(loan=>{
-      const pays=data.payments.filter(p=>p.loan_id===loan.id).sort((a,b)=>a.due_date<b.due_date?-1:1);
-      const paid=pays.filter(p=>p.status==='paid');
-      const overdue=pays.filter(p=>p.status!=='paid'&&p.due_date<todayStr());
-      const planned=pays.filter(p=>p.status!=='paid'&&p.due_date>=todayStr());
+      const rows=data.periods.filter(p=>p.loan_id===loan.id).sort(sortPeriods);
       html+=`<div class="card">
         <div class="row"><h3 style="font-size:16px">${esc(loan.name)}</h3><div class="spacer"></div>
-          <span class="pill ${loan.balance>0?'warn':'good'}">Balance ${money(loan.balance)}</span></div>
-        ${loan.notes?`<div class="meta muted" style="font-size:12px;margin-top:4px">${esc(loan.notes)}</div>`:''}
-        <div style="margin-top:6px"><button class="btn ghost tiny" onclick="App.payForm('${loan.id}')">+ Schedule payment</button>
-          <button class="btn line tiny" onclick="App.delLoan('${loan.id}')">Delete loan</button></div>
-        ${payTable('Overdue', overdue, 'bad')}
-        ${payTable('Planned', planned, 'gray')}
-        ${payTable('Paid', paid, 'good')}
-      </div>`;
+          <span class="pill ${Number(loan.balance)>0?'warn':'good'}">Balance ${money(loan.balance)}</span></div>
+        ${loan.notes?`<div class="muted" style="font-size:12px;margin-top:4px">${esc(loan.notes)}</div>`:''}
+        <div class="row" style="margin-top:8px"><button class="btn line tiny" onclick="App.delLoan('${loan.id}')">Delete loan</button></div>`;
+      rows.forEach(p=>{
+        const overdue=p.status!=='paid'&&p.due_date&&p.due_date<todayStr();
+        const cls=p.status==='paid'?'good':overdue?'bad':'gray';
+        const lbl=p.status==='paid'?'Paid':overdue?'Overdue':'Planned';
+        html+=`<div style="border:1px solid var(--line);border-radius:12px;padding:11px;margin-top:10px">
+          <div class="row"><b>${monthShort(p.month)} · ${PERIOD_LABEL(p.period)}</b>
+            <span class="pill ${cls}" style="margin-left:8px">${lbl}</span><div class="spacer"></div>
+            <span class="muted" style="font-size:12px">Due ${fmtDay(p.due_date)}</span></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;margin-top:9px;font-size:13px">
+            <div class="row"><span class="muted">Due this period</span><div class="spacer"></div><b>${money(p.due_amount)}</b></div>
+            <div class="row"><span class="muted">Planned</span><div class="spacer"></div><b>${money(p.planned_payment)}</b></div>
+            <div class="row"><span class="muted">Paid</span><div class="spacer"></div><b>${money(p.paid_amount)}</b></div>
+            <div class="row"><span class="muted">Balance after</span><div class="spacer"></div><b style="color:${Number(p.balance_after)>0?'var(--warn)':'var(--good)'}">${money(p.balance_after)}</b></div>
+          </div>
+          <div class="row" style="gap:6px;margin-top:10px;flex-wrap:wrap">
+            ${p.status!=='paid'
+              ? `<button class="btn ghost tiny" onclick="App.planForm('${p.id}')">Set planned</button><button class="btn tiny" onclick="App.payForm('${p.id}')">Record payment</button>`
+              : `<button class="btn line tiny" onclick="App.unpayPeriod('${p.id}')">Undo payment</button>`}
+            <button class="btn line tiny" onclick="App.remindLoan('${p.id}')">🔔 Remind</button>
+            <button class="btn line tiny" onclick="App.delPeriod('${p.id}')">Remove</button>
+          </div>
+        </div>`;
+      });
+      html+='</div>';
     });
     $('#loanBody').innerHTML=html;
   }
-  function payTable(title, list, cls){
-    if(!list.length) return '';
-    let rows=list.map(p=>{
-      const per=p.pay_period==='mid'?'Mid':'End';
-      const act = p.status==='paid'
-        ? `<button class="icon-btn" title="Undo" onclick="App.unpay('${p.id}')">↩</button>`
-        : `<button class="btn tiny" onclick="App.markPaid('${p.id}')">Pay</button>`;
-      return `<tr><td>${new Date(p.due_date+'T00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'})}<br><span class="muted" style="font-size:11px">${per}</span></td>
-        <td class="num">${money(p.amount_due)}</td>
-        <td class="num">${p.status==='paid'?money(p.amount_paid):'—'}</td>
-        <td class="num">${money(p.balance_after)}</td>
-        <td style="text-align:right">${act} <button class="icon-btn del" onclick="App.delPay('${p.id}')">✕</button></td></tr>`;
-    }).join('');
-    return `<div class="group-title" style="margin-top:14px"><span class="pill ${cls}">${title}</span> <span class="count">${list.length}</span></div>
-      <table class="pay"><thead><tr><th>Due</th><th class="num">Due amt</th><th class="num">Paid</th><th class="num">Bal after</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+
+  async function syncLoanToBudget(p, loan){
+    const amount = p.status==='paid' ? (Number(p.paid_amount)||Number(p.planned_payment)||0) : (Number(p.planned_payment)||0);
+    const existing = data.expenses.find(e=>e.source==='loan'&&e.source_id===p.id);
+    if(amount<=0){ if(existing) await del('budget_expenses',existing.id,data.expenses); return; }
+    const patch={ month:p.month, period:p.period, category:'Loans', name:loan.name, amount,
+      status:p.status==='paid'?'paid':'planned', paid_date:p.status==='paid'?todayStr():null,
+      source:'loan', source_id:p.id, is_recurring:false };
+    if(existing) await upd('budget_expenses',existing.id,patch,data.expenses);
+    else await ins('budget_expenses',patch,data.expenses);
   }
-  async function markPaid(id){
-    const p=data.payments.find(x=>x.id===id); const loan=data.loans.find(l=>l.id===p.loan_id);
-    const newBal=Math.max(0, Number(loan.balance||0)-Number(p.amount_due||0));
-    await upd('loan_payments',id,{status:'paid',amount_paid:p.amount_due,paid_date:todayStr(),balance_after:newBal},data.payments);
-    await upd('loans',loan.id,{balance:newBal},data.loans);
-    renderLoans(); toast('Paid — balance carried over');
-  }
-  async function unpay(id){
-    const p=data.payments.find(x=>x.id===id); const loan=data.loans.find(l=>l.id===p.loan_id);
-    const restored=Number(loan.balance||0)+Number(p.amount_paid||0);
-    await upd('loan_payments',id,{status:'planned',amount_paid:0,paid_date:null,balance_after:restored},data.payments);
-    await upd('loans',loan.id,{balance:restored},data.loans);
-    renderLoans();
-  }
-  async function delPay(id){ await del('loan_payments',id,data.payments); renderLoans(); }
-  async function delLoan(id){
-    if(!confirm('Delete this loan and all its payments?'))return;
-    await sb.from('loan_payments').delete().eq('loan_id',id);
-    data.payments=data.payments.filter(p=>p.loan_id!==id);
-    await del('loans',id,data.loans); renderLoans();
-  }
+
   function loanForm(){
-    openSheet(`<h3>New long-term payment</h3>
-      <div class="field"><label>Name</label><input id="f_name" placeholder="e.g. Vios car amortization" /></div>
-      <div class="field two"><div><label>Total / principal</label><input id="f_prin" type="number" inputmode="decimal" placeholder="0" /></div>
-      <div><label>Current balance</label><input id="f_bal" type="number" inputmode="decimal" placeholder="0" /></div></div>
-      <div class="field"><label>Usual installment</label><input id="f_inst" type="number" inputmode="decimal" placeholder="0" /></div>
+    const m=new Date().toISOString().slice(0,7);
+    openSheet(`<h3>New loan / balance</h3>
+      <div class="field"><label>Name</label><input id="f_name" placeholder="e.g. Vios amortization" /></div>
+      <div class="field two"><div><label>Current balance</label><input id="f_bal" type="number" inputmode="decimal" placeholder="0" /></div>
+      <div><label>Usual payment / period</label><input id="f_pay" type="number" inputmode="decimal" placeholder="0" /></div></div>
+      <div class="field two"><div><label>Start month</label><input id="f_month" type="month" value="${m}" /></div>
+      <div><label>Start period</label><select id="f_per"><option value="mid">15th</option><option value="end">30th</option></select></div></div>
       <div class="field"><label>Notes</label><input id="f_notes" placeholder="lender, term, etc." /></div>
       <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.addLoan()">Add</button></div>`);
     setTimeout(()=>$('#f_name').focus(),100);
   }
   async function addLoan(){
     const name=$('#f_name').value.trim(); if(!name){toast('Name needed');return;}
-    const prin=parseFloat($('#f_prin').value)||0, bal=parseFloat($('#f_bal').value)||prin, inst=parseFloat($('#f_inst').value)||0;
-    await ins('loans',{name,principal:prin,balance:bal,installment:inst,notes:$('#f_notes').value.trim()},data.loans);
+    const bal=parseFloat($('#f_bal').value)||0, pay=parseFloat($('#f_pay').value)||0;
+    const m=$('#f_month').value||new Date().toISOString().slice(0,7), per=$('#f_per').value;
+    const loan=await ins('loans',{name,balance:bal,installment:pay,notes:$('#f_notes').value.trim()},data.loans);
+    if(!loan)return;
+    const lp=await ins('loan_periods',{loan_id:loan.id,month:m,period:per,due_date:periodDueDate(m,per),
+      due_amount:bal,planned_payment:Math.min(pay||bal,bal),paid_amount:0,status:'planned',balance_after:bal},data.periods);
+    if(lp) await syncLoanToBudget(lp,loan);
     closeSheet(); renderLoans();
   }
-  function payForm(loanId){
-    const loan=data.loans.find(l=>l.id===loanId);
-    openSheet(`<h3>Schedule payment — ${esc(loan.name)}</h3>
-      <div class="field two"><div><label>Due date</label><input id="p_date" type="date" value="${todayStr()}" /></div>
-      <div><label>Pay period</label><select id="p_per"><option value="mid">Mid-month</option><option value="end">End-month</option></select></div></div>
-      <div class="field"><label>Amount due</label><input id="p_amt" type="number" inputmode="decimal" value="${loan.installment||''}" placeholder="0" /></div>
-      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.addPay('${loanId}')">Add payment</button></div>`);
+
+  function planForm(id){
+    const p=data.periods.find(x=>x.id===id);
+    openSheet(`<h3>Planned payment</h3>
+      <p class="muted" style="font-size:13px">Due this period: <b>${money(p.due_amount)}</b>. Plan a full or partial amount — the rest rolls to the next pay period.</p>
+      <div class="field"><label>Planned payment</label><input id="f_plan" type="number" inputmode="decimal" value="${p.planned_payment||''}" placeholder="0" /></div>
+      <div class="field"><label>Due date</label><input id="f_date" type="date" value="${p.due_date||''}" /></div>
+      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.savePlan('${id}')">Save & sync to budget</button></div>`);
   }
-  async function addPay(loanId){
-    const loan=data.loans.find(l=>l.id===loanId);
-    const amt=parseFloat($('#p_amt').value)||0;
-    await ins('loan_payments',{loan_id:loanId,due_date:$('#p_date').value||todayStr(),pay_period:$('#p_per').value,
-      amount_due:amt,amount_paid:0,status:'planned',balance_after:Number(loan.balance||0)},data.payments);
+  async function savePlan(id){
+    const p=data.periods.find(x=>x.id===id), loan=data.loans.find(l=>l.id===p.loan_id);
+    const plan=parseFloat($('#f_plan').value)||0, dd=$('#f_date').value||p.due_date;
+    await upd('loan_periods',id,{planned_payment:plan,due_date:dd},data.periods);
+    await syncLoanToBudget(data.periods.find(x=>x.id===id),loan);
     closeSheet(); renderLoans();
+  }
+
+  function payForm(id){
+    const p=data.periods.find(x=>x.id===id);
+    openSheet(`<h3>Record payment</h3>
+      <p class="muted" style="font-size:13px">Due this period: <b>${money(p.due_amount)}</b></p>
+      <div class="field"><label>Amount paid</label><input id="f_paid" type="number" inputmode="decimal" value="${p.planned_payment||p.due_amount||''}" /></div>
+      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.confirmPay('${id}')">Mark paid</button></div>`);
+  }
+  async function confirmPay(id){
+    const p=data.periods.find(x=>x.id===id), loan=data.loans.find(l=>l.id===p.loan_id);
+    const paid=parseFloat($('#f_paid').value)||0, after=Math.max(0,Number(p.due_amount)-paid);
+    await upd('loan_periods',id,{paid_amount:paid,status:'paid',balance_after:after},data.periods);
+    await upd('loans',loan.id,{balance:after},data.loans);
+    await syncLoanToBudget(data.periods.find(x=>x.id===id),loan);
+    if(after>0){
+      const np=nextPeriod(p.month,p.period);
+      const exists=data.periods.some(x=>x.loan_id===loan.id&&x.month===np.month&&x.period===np.period);
+      if(!exists){
+        const nlp=await ins('loan_periods',{loan_id:loan.id,month:np.month,period:np.period,due_date:periodDueDate(np.month,np.period),
+          due_amount:after,planned_payment:Math.min((loan.installment||after),after),paid_amount:0,status:'planned',balance_after:after},data.periods);
+        if(nlp) await syncLoanToBudget(nlp,loan);
+      }
+    }
+    closeSheet(); renderLoans();
+    toast(after>0?('Paid — '+money(after)+' rolled to next period'):'Paid — balance cleared 🎉');
+  }
+  async function unpayPeriod(id){
+    const p=data.periods.find(x=>x.id===id), loan=data.loans.find(l=>l.id===p.loan_id);
+    const restored=Number(loan.balance)+Number(p.paid_amount);
+    await upd('loan_periods',id,{paid_amount:0,status:'planned',balance_after:p.due_amount},data.periods);
+    await upd('loans',loan.id,{balance:restored},data.loans);
+    await syncLoanToBudget(data.periods.find(x=>x.id===id),loan);
+    renderLoans();
+  }
+  function remindLoan(id){
+    const p=data.periods.find(x=>x.id===id), loan=data.loans.find(l=>l.id===p.loan_id);
+    downloadICS(loan.name+' payment', p.due_date, '09:00', 'Due this period: '+money(p.due_amount)+' · Planned: '+money(p.planned_payment));
+  }
+  async function delPeriod(id){
+    const ex=data.expenses.find(e=>e.source==='loan'&&e.source_id===id);
+    if(ex) await del('budget_expenses',ex.id,data.expenses);
+    await del('loan_periods',id,data.periods); renderLoans();
+  }
+  async function delLoan(id){
+    if(!confirm('Delete this loan, its periods, and its synced budget items?'))return;
+    const ids=data.periods.filter(p=>p.loan_id===id).map(p=>p.id);
+    for(const e of data.expenses.filter(e=>e.source==='loan'&&ids.includes(e.source_id))) await del('budget_expenses',e.id,data.expenses);
+    await sb.from('loan_periods').delete().eq('loan_id',id);
+    data.periods=data.periods.filter(p=>p.loan_id!==id);
+    await del('loans',id,data.loans); renderLoans();
   }
 
   /* ----- Settings ----- */
@@ -810,7 +870,7 @@ const App = (() => {
     setPeriod, shiftMonth, renderBudget, incomeForm, saveIncome, delInc,
     expenseForm, addExp, toggleExp, delExp,
     viosForm, addVios, delVios,
-    loanForm, addLoan, delLoan, payForm, addPay, markPaid, unpay, delPay,
+    loanForm, addLoan, delLoan, planForm, savePlan, payForm, confirmPay, unpayPeriod, delPeriod, remindLoan,
     setOpt, addCat, removeCat, delRecurring, resetCreds };
 })();
 document.addEventListener('DOMContentLoaded', App.init);
