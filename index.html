@@ -319,7 +319,7 @@ const App = (() => {
   /* ---------- supabase connection ---------- */
   function connect(){
     // Instantly initializes using your hardcoded keys above
-    sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    sb = supabase.createClient(https://chkcpdoolfrfjesfkojn.supabase.co, eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNoa2NwZG9vbGZyZmplc2Zrb2puIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzODEzNDgsImV4cCI6MjA5Nzk1NzM0OH0.SpJ2LrftcoGoF0VL0DJ9cMCHXHv03qnPj8xB5SvoHOE);
     return true;
   }
   
@@ -998,8 +998,12 @@ function renderLoans(){
   /* ----- FAB router ----- */
   function fab(){ ({shopping:shopForm,budget:expenseForm,vios:viosForm,loans:loanForm}[tab]||(()=>{}))(); }
 
-  /* ----- init ----- */
+ /* ----- init ----- */
   function init(){
+    // Clear old memory keys so it has to use your new hardcoded ones
+    localStorage.removeItem('lh_url');
+    localStorage.removeItem('lh_key');
+
     if(!connect())return;
     go('shopping');
     loadAll();
