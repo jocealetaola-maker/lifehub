@@ -133,6 +133,16 @@
   table.pay td.num{text-align:right;font-variant-numeric:tabular-nums}
 
   /* bottom nav */
+  .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+  .cal .dow{font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);text-align:center;padding:4px 0}
+  .cal .day{aspect-ratio:1;border:1px solid var(--line);border-radius:9px;display:flex;flex-direction:column;align-items:center;padding:5px 0 0;font-size:13px;background:var(--card)}
+  .cal .day.out{opacity:0;border:none;background:none}
+  .cal .day.today{border-color:var(--accent);border-width:2px;font-weight:800}
+  .cal .day.sel{background:var(--accent-soft)}
+  .cal .day .dots{display:flex;gap:3px;margin-top:3px;min-height:6px}
+  .cal .day .dot,.dot{width:6px;height:6px;border-radius:50%}
+  .dot.pay{background:var(--bad)} .dot.note{background:var(--accent)}
+
   nav.tabs{
     position:fixed;left:0;right:0;bottom:0;z-index:40;
     background:color-mix(in srgb, var(--card) 92%, transparent);
@@ -182,10 +192,23 @@
     <div class="brand">Life<span>Hub</span></div>
     <div class="sub" id="syncState">Connecting…</div>
   </div>
-  <button class="btn ghost tiny" onclick="App.go('settings')">⚙︎ Settings</button>
+  <button class="btn ghost tiny" id="gearBtn" onclick="App.go('settings')">⚙︎ Settings</button>
 </header>
 
 <main>
+  <section id="auth" style="display:none;max-width:420px;margin:36px auto;padding:0 18px">
+    <div class="card" style="padding:22px">
+      <div class="brand" style="font-size:26px;margin-bottom:4px">Life<span style="color:var(--accent)">Hub</span></div>
+      <p class="muted" id="authSub" style="font-size:13px;margin-bottom:18px">Log in to your account</p>
+      <div class="field"><label>Email</label><input id="auEmail" type="email" autocomplete="email" placeholder="you@email.com" /></div>
+      <div class="field"><label>Password</label><input id="auPass" type="password" autocomplete="current-password" placeholder="At least 6 characters" /></div>
+      <button class="btn" id="auBtn" style="width:100%;justify-content:center;padding:12px" onclick="App.authSubmit()">Log in</button>
+      <p style="text-align:center;margin-top:14px;font-size:13px" class="muted">
+        <span id="authToggleTxt">New here?</span>
+        <a href="#" id="authToggleLink" onclick="App.authToggle();return false" style="color:var(--accent);font-weight:600">Create an account</a></p>
+    </div>
+  </section>
+
   <section id="tab-shopping" class="tab-panel">
     <div class="panel-head"><h2>Shopping</h2><span class="hint">Tap circle = bought</span></div>
     <div id="shoppingList"></div>
@@ -199,16 +222,26 @@
       <button onclick="App.shiftMonth(1)">›</button>
     </div>
     <div class="seg" id="periodSeg">
-      <button data-p="mid" class="on" onclick="App.setPeriod('mid')">Mid-month</button>
-      <button data-p="end" onclick="App.setPeriod('end')">End-month</button>
-      <button data-p="both" onclick="App.setPeriod('both')">Both</button>
+      <button data-p="mid" class="on" onclick="App.setPeriod('mid')">Mid-month (15th)</button>
+      <button data-p="end" onclick="App.setPeriod('end')">End-month (30th)</button>
     </div>
     <div id="budgetBody"></div>
   </section>
 
-  <section id="tab-vios" class="tab-panel">
-    <div class="panel-head"><h2>Vios rental</h2><span class="hint">Separate income</span></div>
-    <div id="viosBody"></div>
+  <section id="tab-notes" class="tab-panel">
+    <div class="panel-head"><h2>Notes</h2><span class="hint">Brain dump</span></div>
+    <div id="notesBody"></div>
+  </section>
+
+  <section id="tab-calendar" class="tab-panel">
+    <div class="panel-head"><h2>Calendar</h2><span class="hint">Payments & notes</span></div>
+    <div class="monthnav">
+      <button onclick="App.calShift(-1)">‹</button>
+      <div class="m" id="calLabel"></div>
+      <button onclick="App.calShift(1)">›</button>
+    </div>
+    <div id="calBody"></div>
+    <div id="calDay"></div>
   </section>
 
   <section id="tab-loans" class="tab-panel">
@@ -227,8 +260,9 @@
 <nav class="tabs" id="nav">
   <button data-t="shopping" onclick="App.go('shopping')"><span class="ic">🛒</span>Shopping</button>
   <button data-t="budget" onclick="App.go('budget')"><span class="ic">₱</span>Budget</button>
-  <button data-t="vios" onclick="App.go('vios')"><span class="ic">🚗</span>Vios</button>
-  <button data-t="loans" onclick="App.go('loans')"><span class="ic">📅</span>Loans</button>
+  <button data-t="loans" onclick="App.go('loans')"><span class="ic">💳</span>Loans</button>
+  <button data-t="notes" onclick="App.go('notes')"><span class="ic">📝</span>Notes</button>
+  <button data-t="calendar" onclick="App.go('calendar')"><span class="ic">🗓️</span>Calendar</button>
 </nav>
 
 <div class="scrim" id="scrim"><div class="sheet" id="sheet"></div></div>
@@ -250,7 +284,7 @@ const App = (() => {
   };
   let S = {...DEFAULTS};
 
-  const data = { shopping:[], incomes:[], expenses:[], recurring:[], vios:[], loans:[], payments:[], periods:[] };
+  const data = { shopping:[], incomes:[], expenses:[], recurring:[], notes:[], loans:[], payments:[], periods:[] };
 
   /* ---------- helpers ---------- */
   const $ = s => document.querySelector(s);
@@ -307,28 +341,95 @@ const App = (() => {
     toast('Opening reminder — tap Add in Calendar');
   }
 
-  // 1. HARDCODE YOUR CREDENTIALS DIRECTLY HERE:
+  /* ---------- supabase connection + auth ---------- */
+  let uid=null, authEmail=null, authMode='login';
+
+  // Your Supabase project (safe to ship publicly now that per-user RLS is on):
   const SUPABASE_URL = "https://chkcpdoolfrfjesfkojn.supabase.co";
   const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNoa2NwZG9vbGZyZmplc2Zrb2puIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzODEzNDgsImV4cCI6MjA5Nzk1NzM0OH0.SpJ2LrftcoGoF0VL0DJ9cMCHXHv03qnPj8xB5SvoHOE";
 
-  /* ---------- supabase connection ---------- */
   function connect(){
-    // Instantly initializes using your hardcoded string keys above
     sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     return true;
   }
-  
-  function saveCreds(){
-    return true;
+
+  function showAuth(){
+    document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+    $('#nav').style.display='none';
+    $('#fab').style.display='none';
+    $('#gearBtn').style.display='none';
+    $('#auth').style.display='block';
+    $('#syncState').textContent='Please log in';
   }
+  function showApp(){
+    $('#auth').style.display='none';
+    $('#nav').style.display='flex';
+    $('#gearBtn').style.display='inline-flex';
+    go('shopping');
+  }
+  function authToggle(){
+    authMode = authMode==='login' ? 'signup' : 'login';
+    const login = authMode==='login';
+    $('#authSub').textContent = login ? 'Log in to your account' : 'Create your LifeHub account';
+    $('#auBtn').textContent = login ? 'Log in' : 'Sign up';
+    $('#authToggleTxt').textContent = login ? 'New here?' : 'Already have an account?';
+    $('#authToggleLink').textContent = login ? 'Create an account' : 'Log in instead';
+    $('#auPass').setAttribute('autocomplete', login?'current-password':'new-password');
+  }
+  async function authSubmit(){
+    const email=$('#auEmail').value.trim(), pass=$('#auPass').value;
+    if(!email||!pass){ toast('Email and password required'); return; }
+    if(authMode==='signup' && pass.length<6){ toast('Password needs 6+ characters'); return; }
+    $('#auBtn').textContent='Please wait…';
+    try{
+      if(authMode==='signup'){
+        const { data, error } = await sb.auth.signUp({ email, password: pass });
+        if(error) throw error;
+        if(!data.session){ // email confirmation still on
+          toast('Account created — check your email to confirm, then log in.');
+          authMode='login'; authToggle(); authToggle(); $('#auBtn').textContent='Log in'; return;
+        }
+      } else {
+        const { error } = await sb.auth.signInWithPassword({ email, password: pass });
+        if(error) throw error;
+      }
+    }catch(e){
+      console.error(e);
+      toast(e.message || 'Could not sign in');
+      $('#auBtn').textContent = authMode==='login'?'Log in':'Sign up';
+    }
+    // onAuthStateChange handles the rest
+  }
+  async function doLogout(){
+    await sb.auth.signOut();
+    uid=null; authEmail=null;
+    Object.keys(data).forEach(k=>data[k].length=0);
+    $('#auPass').value='';
+    showAuth();
+  }
+
+  async function bootstrap(){
+    const { data:{ session } } = await sb.auth.getSession();
+    if(session){ uid=session.user.id; authEmail=session.user.email; showApp(); loadAll(); }
+    else { showAuth(); }
+    sb.auth.onAuthStateChange((_evt, sess)=>{
+      if(sess && sess.user && sess.user.id!==uid){
+        uid=sess.user.id; authEmail=sess.user.email; showApp(); loadAll();
+      } else if(!sess && uid){
+        uid=null; showAuth();
+      }
+    });
+  }
+
+  function saveCreds(){ return true; }
 
   async function loadAll(){
     $('#syncState').textContent='Syncing…';
     try{
-      // settings
-      let { data:set } = await sb.from('app_settings').select('*').eq('id',1).maybeSingle();
+      // settings (one row per user; RLS scopes it to me)
+      let { data:set } = await sb.from('app_settings').select('*').maybeSingle();
       if(set && set.data) S={...DEFAULTS, ...set.data};
-      else await sb.from('app_settings').insert({id:1,data:S});
+      else await sb.from('app_settings').insert({ data:S });   // user_id auto-stamped by DB default
       applyTheme();
 
       // Safe grab helper that won't completely crash if sorting fails
@@ -348,7 +449,7 @@ const App = (() => {
       data.incomes  = await grab('budget_incomes', 'created_at');
       data.expenses = await grab('budget_expenses', 'created_at');
       data.recurring= await grab('recurring_expenses', 'created_at');
-      data.vios     = await grab('vios_entries', 'date');
+      data.notes    = await grab('notes', 'created_at');
       data.loans    = await grab('loans', 'created_at');
       
       // Fallback safe fetches for loan attachments
@@ -408,7 +509,7 @@ const App = (() => {
   function renderAll(){ render(tab); }
   function render(t){
     ({shopping:renderShopping, budget:renderBudget,
-      vios:renderVios, loans:renderLoans, settings:renderSettings}[t]||(()=>{}))();
+      notes:renderNotes, calendar:renderCalendar, loans:renderLoans, settings:renderSettings}[t]||(()=>{}))();
   }
 
   /* ----- Shopping ----- */
@@ -493,7 +594,7 @@ const App = (() => {
   /* ----- Budget ----- */
   function setPeriod(p){ period=p; document.querySelectorAll('#periodSeg button').forEach(b=>b.classList.toggle('on',b.dataset.p===p)); renderBudget(); }
   function shiftMonth(d){ const dt=new Date(month+'-01'); dt.setMonth(dt.getMonth()+d); month=dt.toISOString().slice(0,7); autoLogRecurring().then(renderBudget); }
-  function periodsActive(){ return period==='both'?['mid','end']:[period]; }
+  function periodsActive(){ return [period]; }
 
   function renderBudget(){
     $('#monthLabel').textContent=monthName(month);
@@ -511,10 +612,9 @@ const App = (() => {
       totIncome+=income; totPaid+=sumPaid; totPlanned+=sumPlanned;
 
       let incRows = incs.map(i=>{
-        const isAuto = i.source && i.source!=='manual';
-        return `<div class="exp"><span class="nm">${esc(i.label||'Income')}${isAuto?' <span class="muted" style="font-size:11px">(auto)</span>':''}</span>
+        return `<div class="exp"><span class="nm">${esc(i.label||'Income')}</span>
           <span class="amt" style="color:var(--good)">${money(i.amount)}</span>
-          ${isAuto?'':`<button class="icon-btn" onclick="App.editIncomeForm('${i.id}')">✏️</button><button class="icon-btn del" onclick="App.delIncomeLine('${i.id}')">✕</button>`}</div>`;
+          <button class="icon-btn" onclick="App.editIncomeForm('${i.id}')">✏️</button><button class="icon-btn del" onclick="App.delIncomeLine('${i.id}')">✕</button></div>`;
       }).join('');
       if(!incs.length) incRows = `<p class="muted" style="font-size:13px;padding:4px 2px">No income yet for this period.</p>`;
 
@@ -689,99 +789,95 @@ const App = (() => {
     closeSheet(); renderBudget();
   }
 
-  /* ----- Vios (With Automatic Budget Income Sync) ----- */
-  function renderVios(){
-    const inc=data.vios.filter(v=>v.kind==='income').reduce((s,v)=>s+Number(v.amount||0),0);
-    const exp=data.vios.filter(v=>v.kind==='expense').reduce((s,v)=>s+Number(v.amount||0),0);
-    let html=`<div class="summary"><div class="stat big ${inc-exp<0?'bad':'good'}"><div class="k">Net Vios Cashflow</div><div class="v">${money(inc-exp)}</div></div>
-      <div class="stat"><div class="k">Total Income</div><div class="v">${money(inc)}</div></div>
-      <div class="stat"><div class="k">Total Costs</div><div class="v">${money(exp)}</div></div></div>`;
-    if(!data.vios.length){ html+=emptyState('No Vios entries','Log rental income and any costs (fuel, maintenance, insurance)'); }
-    else{
-      html+='<div class="group-title">Entries</div><div class="card">';
-      data.vios.slice().reverse().forEach(v=>{
-        html+=`<div class="item"><div class="body"><div class="title">${esc(v.description||(v.kind==='income'?'Rental income':'Cost'))}</div>
-          <div class="meta">${new Date(v.date+'T00:00').toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}</div></div>
-          <div class="amt" style="font-weight:700;color:${v.kind==='income'?'var(--good)':'var(--bad)'}">${v.kind==='income'?'+':'−'}${money(v.amount)}</div>
-          <button class="icon-btn" style="margin-left:8px" onclick="App.editViosForm('${v.id}')">✏️</button>
-          <button class="icon-btn del" style="margin-left:6px" onclick="App.delVios('${v.id}')">✕</button></div>`;
-      });
-      html+='</div>';
+  /* ----- Notes (brain dump) ----- */
+  function renderNotes(){
+    const wrap=$('#notesBody');
+    if(!data.notes.length){ wrap.innerHTML=emptyState('Brain is clear ✨','Tap + to dump anything you need to remember'); return; }
+    const sorted=data.notes.slice().sort((a,b)=>{
+      const pin=(b.pinned?1:0)-(a.pinned?1:0); if(pin) return pin;
+      return (b.created_at||'').localeCompare(a.created_at||'');
+    });
+    let html='';
+    sorted.forEach(n=>{
+      const datePill = n.date?`<span class="pill" style="margin-left:6px">🗓️ ${new Date(n.date+'T00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'})}</span>`:'';
+      html+=`<div class="card" style="margin-bottom:10px">
+        <div class="row"><b style="font-size:15px">${n.pinned?'📌 ':''}${esc(n.title||'Note')}</b>${datePill}<div class="spacer"></div>
+          <button class="icon-btn" onclick="App.editNoteForm('${n.id}')">✏️</button>
+          <button class="icon-btn del" onclick="App.delNote('${n.id}')">✕</button></div>
+        ${n.body?`<div class="muted" style="font-size:14px;margin-top:6px;white-space:pre-wrap">${esc(n.body)}</div>`:''}</div>`;
+    });
+    wrap.innerHTML=html;
+  }
+  function noteForm(dateStr){ openNoteSheet(null, dateStr); }
+  function editNoteForm(id){ openNoteSheet(data.notes.find(n=>n.id===id)); }
+  function openNoteSheet(n, presetDate){
+    const isEdit=!!n;
+    openSheet(`<h3>${isEdit?'Edit':'New'} note</h3>
+      <div class="field"><label>Title</label><input id="n_title" value="${isEdit?esc(n.title||''):''}" placeholder="e.g. Renew Vios registration" /></div>
+      <div class="field"><label>Details</label><textarea id="n_body" placeholder="Brain dump…">${isEdit?esc(n.body||''):''}</textarea></div>
+      <div class="field two"><div><label>Date (optional · shows on calendar)</label><input id="n_date" type="date" value="${isEdit?(n.date||''):(presetDate||'')}" /></div>
+      <div style="display:flex;align-items:flex-end"><label style="font-size:14px;color:var(--ink);margin-bottom:11px"><input type="checkbox" id="n_pin" style="width:auto;margin-right:6px" ${isEdit&&n.pinned?'checked':''}> Pin to top</label></div></div>
+      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.saveNote(${isEdit?`'${n.id}'`:'null'})">${isEdit?'Save':'Add'}</button></div>`);
+    setTimeout(()=>$('#n_title').focus(),100);
+  }
+  async function saveNote(id){
+    const title=$('#n_title').value.trim(), body=$('#n_body').value.trim();
+    if(!title&&!body){toast('Write something first');return;}
+    const patch={ title, body, date:$('#n_date').value||null, pinned:$('#n_pin').checked };
+    if(id) await upd('notes', id, patch, data.notes);
+    else await ins('notes', patch, data.notes);
+    closeSheet(); render(tab);
+  }
+  async function delNote(id){ if(!confirm('Delete this note?'))return; await del('notes', id, data.notes); render(tab); }
+
+  /* ----- Calendar (payments + notes) ----- */
+  let calMonth = new Date().toISOString().slice(0,7);
+  let calSel = todayStr();
+  function calShift(d){ const dt=new Date(calMonth+'-01'); dt.setMonth(dt.getMonth()+d); calMonth=dt.toISOString().slice(0,7); renderCalendar(); }
+  function calPick(ds){ calSel=ds; renderCalendar(); }
+  function calMarks(){
+    const marks={};
+    data.periods.filter(p=>p.status!=='paid' && p.due_date && p.due_date.startsWith(calMonth)).forEach(p=>{
+      const loan=data.loans.find(l=>l.id===p.loan_id);
+      (marks[p.due_date]=marks[p.due_date]||{pay:[],note:[]}).pay.push({name:loan?loan.name:'Payment', amount:(p.planned_payment||p.due_amount)});
+    });
+    data.notes.filter(n=>n.date && n.date.startsWith(calMonth)).forEach(n=>{
+      (marks[n.date]=marks[n.date]||{pay:[],note:[]}).note.push(n);
+    });
+    return marks;
+  }
+  function renderCalendar(){
+    $('#calLabel').textContent = monthName(calMonth);
+    const [y,m]=calMonth.split('-').map(Number);
+    const startDow=new Date(y,m-1,1).getDay();
+    const days=new Date(y,m,0).getDate();
+    const marks=calMarks();
+    const dows=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    let html='<div class="cal">'+dows.map(d=>`<div class="dow">${d}</div>`).join('');
+    for(let i=0;i<startDow;i++) html+='<div class="day out"></div>';
+    for(let d=1;d<=days;d++){
+      const ds=`${calMonth}-${String(d).padStart(2,'0')}`;
+      const mk=marks[ds];
+      let dots=''; if(mk){ if(mk.pay.length)dots+='<span class="dot pay"></span>'; if(mk.note.length)dots+='<span class="dot note"></span>'; }
+      html+=`<div class="day ${ds===todayStr()?'today':''} ${ds===calSel?'sel':''}" onclick="App.calPick('${ds}')">${d}<div class="dots">${dots}</div></div>`;
     }
-    $('#viosBody').innerHTML=html;
+    html+='</div>';
+    html+=`<div class="row" style="gap:16px;margin-top:10px;font-size:12px;justify-content:center">
+      <span><span class="dot pay" style="display:inline-block;vertical-align:middle;margin-right:5px"></span>Payment due</span>
+      <span><span class="dot note" style="display:inline-block;vertical-align:middle;margin-right:5px"></span>Note</span></div>`;
+    $('#calBody').innerHTML=html;
+    renderCalDay(marks);
   }
-
-  // Sync Vios Rental Income to Budget 15th period automatically
-  async function syncViosToBudgetIncome(viosEntry) {
-    const targetMonth = viosEntry.date.slice(0, 7); // Pulls YYYY-MM from date string
-    
-    // Look for an existing budget entry tied to this specific Vios log
-    const existing = data.incomes.find(i => i.source === 'vios' && i.source_id === viosEntry.id);
-    
-    if (viosEntry.kind !== 'income' || Number(viosEntry.amount) <= 0) {
-      if (existing) await del('budget_incomes', existing.id, data.incomes);
-      return;
-    }
-
-    const payload = {
-      month: targetMonth,
-      period: 'mid', // Hardcoded directly to your 15th Pay Period
-      amount: Number(viosEntry.amount),
-      label: `🚗 Vios Rental: ${viosEntry.description || 'Income'}`,
-      source: 'vios',
-      source_id: viosEntry.id
-    };
-
-    if (existing) {
-      await upd('budget_incomes', existing.id, payload, data.incomes);
-    } else {
-      await ins('budget_incomes', payload, data.incomes);
-    }
-  }
-
-  async function delVios(id){ 
-    const existingBudget = data.incomes.find(i => i.source === 'vios' && i.source_id === id);
-    if(existingBudget) await del('budget_incomes', existingBudget.id, data.incomes);
-    await del('vios_entries',id,data.vios); 
-    renderVios(); 
-  }
-
-  function viosForm(){
-    openSheet(`<h3>New Vios Entry</h3>
-      <div class="field"><label>Type</label><select id="f_kind"><option value="income">Income (Rental Received)</option><option value="expense">Cost (Fuel, Repair, Maintenance)</option></select></div>
-      <div class="field"><label>Description</label><input id="f_desc" placeholder="e.g. Weekly rental — Mr. Cruz" /></div>
-      <div class="field two"><div><label>Amount (₱)</label><input id="f_amt" type="number" inputmode="decimal" placeholder="0" /></div>
-      <div><label>Date</label><input id="f_date" type="date" value="${todayStr()}" /></div></div>
-      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.addVios()">Add & Sync</button></div>`);
-  }
-
-  async function addVios(){
-    const amt=parseFloat($('#f_amt').value)||0; if(!amt){toast('Amount needed');return;}
-    const row = await ins('vios_entries',{kind:$('#f_kind').value,description:$('#f_desc').value.trim(),amount:amt,date:$('#f_date').value||todayStr()},data.vios);
-    if(row) await syncViosToBudgetIncome(row);
-    closeSheet(); renderVios();
-  }
-
-  function editViosForm(id) {
-    const v = data.vios.find(x => x.id === id);
-    openSheet(`<h3>Edit Vios Entry</h3>
-      <div class="field"><label>Type</label><select id="e_kind"><option value="income" ${v.kind==='income'?'selected':''}>Income (Rental Received)</option><option value="expense" ${v.kind==='expense'?'selected':''}>Cost (Fuel, Repair, Maintenance)</option></select></div>
-      <div class="field"><label>Description</label><input id="e_desc" value="${esc(v.description)}" /></div>
-      <div class="field two"><div><label>Amount (₱)</label><input id="e_amt" type="number" inputmode="decimal" value="${v.amount}" /></div>
-      <div><label>Date</label><input id="e_date" type="date" value="${v.date}" /></div></div>
-      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.saveViosEdits('${id}')">Save Changes</button></div>`);
-  }
-
-  async function saveViosEdits(id) {
-    const amt = parseFloat($('#e_amt').value) || 0; if(!amt){toast('Amount needed');return;}
-    const patch = { kind: $('#e_kind').value, description: $('#e_desc').value.trim(), amount: amt, date: $('#e_date').value };
-    
-    await upd('vios_entries', id, patch, data.vios);
-    const updatedRow = data.vios.find(x => x.id === id);
-    if(updatedRow) await syncViosToBudgetIncome(updatedRow);
-    
-    closeSheet(); renderVios();
-    toast('Entry updated & budget synced! 🚗');
+  function renderCalDay(marks){
+    if(!calSel){ $('#calDay').innerHTML=''; return; }
+    const mk=marks?marks[calSel]:calMarks()[calSel];
+    const pays=(mk&&mk.pay)||[], notes=(mk&&mk.note)||[];
+    let html=`<div class="group-title" style="margin-top:18px">${new Date(calSel+'T00:00').toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}</div><div class="card">`;
+    if(!pays.length && !notes.length) html+=`<p class="muted" style="font-size:13px">Nothing scheduled. Tap + to add a note for this day.</p>`;
+    pays.forEach(p=>{ html+=`<div class="item"><div class="body"><div class="title">💳 ${esc(p.name)}</div><div class="meta">Payment due · ${money(p.amount)}</div></div><button class="btn ghost tiny" onclick="App.go('loans')">Open</button></div>`; });
+    notes.forEach(n=>{ html+=`<div class="item"><div class="body"><div class="title">📝 ${esc(n.title||'Note')}</div>${n.body?`<div class="meta">${esc(n.body).slice(0,90)}</div>`:''}</div><button class="icon-btn" onclick="App.editNoteForm('${n.id}')">✏️</button></div>`; });
+    html+='</div>';
+    $('#calDay').innerHTML=html;
   }
 
   /* ----- Loans (Dynamic Revolving Planning Engine) ----- */
@@ -1115,7 +1211,10 @@ const App = (() => {
     html+=`<div class="card"><h3 style="font-size:15px;margin-bottom:8px">Add to Home Screen</h3>
       <p class="muted" style="font-size:13px">In Safari: tap <b>Share</b> → <b>Add to Home Screen</b>. LifeHub then opens full-screen like an app.</p></div>`;
 
-    html+=`<div class="card"><button class="btn line" style="width:100%;justify-content:center" onclick="App.resetCreds()">Disconnect this device</button></div>`;
+    html+=`<div class="card"><h3 style="font-size:15px;margin-bottom:8px">Account</h3>
+      <p class="muted" style="font-size:13px;margin-bottom:4px">Signed in as <b style="color:var(--ink)">${esc(authEmail||'')}</b></p>
+      <p class="muted" style="font-size:11px;word-break:break-all;margin-bottom:12px">Account ID: ${esc(uid||'')}</p>
+      <button class="btn line" style="width:100%;justify-content:center" onclick="App.doLogout()">Log out</button></div>`;
     $('#settingsBody').innerHTML=html;
   }
   function catEditor(title,key){
@@ -1130,33 +1229,33 @@ const App = (() => {
   async function addCat(key){ const inp=$('#newcat_'+key); const v=inp.value.trim(); if(!v)return; if(!S[key].includes(v))S[key].push(v); inp.value=''; await saveSettings(); renderSettings(); }
   async function removeCat(key,i){ S[key].splice(i,1); await saveSettings(); renderSettings(); }
   async function delRecurring(id){ await del('recurring_expenses',id,data.recurring); renderSettings(); }
-  async function saveSettings(){ await sb.from('app_settings').update({data:S,updated_at:new Date().toISOString()}).eq('id',1); }
-  function resetCreds(){ if(confirm('Disconnect? Your data stays in Supabase; you can reconnect anytime.')){ localStorage.removeItem(LS.url); localStorage.removeItem(LS.key); location.reload(); } }
+  async function saveSettings(){ await sb.from('app_settings').upsert({user_id:uid, data:S, updated_at:new Date().toISOString()}, {onConflict:'user_id'}); }
 
   function emptyState(b,p){ return `<div class="empty"><b>${b}</b>${p}</div>`; }
 
   /* ----- FAB router ----- */
-  function fab(){ ({shopping:shopForm,budget:expenseForm,vios:viosForm,loans:loanForm}[tab]||(()=>{}))(); }
+  function fab(){ ({shopping:shopForm,budget:expenseForm,loans:loanForm,notes:()=>noteForm(),calendar:()=>noteForm(calSel||todayStr())}[tab]||(()=>{}))(); }
 
   /* ----- init ----- */
   function init(){
-    if(!connect())return;
-    go('shopping');
-    loadAll();
+    connect();
+    bootstrap();
   }
 
   return { init, go, fab, saveCreds, closeSheet,
+    authSubmit, authToggle, doLogout,
     toggleShop, delShop, shopForm, editShopForm, saveShop, onShopImg, clearShopImg,
     setPeriod, shiftMonth, renderBudget, incomeForm, saveIncome, delInc,
     incomeAddForm, editIncomeForm, saveIncomeLine, delIncomeLine,
     recurringForm, editRecurringForm, saveRecurring, askDelRecurring,
     expenseForm, addExp, toggleExp, delExp,
-    viosForm, addVios, delVios, editViosForm, saveViosEdits,
+    noteForm, editNoteForm, saveNote, delNote,
+    calShift, calPick,
     loanForm, addLoan, delLoan, planForm, savePlan, payForm, confirmPay, unpayPeriod, delPeriod, remindLoan,
     extendNextPeriod,
     editLoanSettingsForm, saveLoanSettings,
     openLoanLedger, closeLoanLedger,
-    setOpt, addCat, removeCat, delRecurring, resetCreds };
+    setOpt, addCat, removeCat, delRecurring };
 })();
 document.addEventListener('DOMContentLoaded', App.init);
 </script>
