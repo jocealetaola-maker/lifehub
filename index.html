@@ -653,6 +653,23 @@ const App = (() => {
   function periodDueDate(m,p){ const [y,mm]=m.split('-').map(Number); if(p==='mid')return m+'-15'; const last=new Date(y,mm,0).getDate(); return m+'-'+String(Math.min(30,last)).padStart(2,'0'); }
   function sortPeriods(a,b){ const k=x=>x.month+(x.period==='mid'?'1':'2'); return k(a)<k(b)?-1:k(a)>k(b)?1:0; }
 
+  // Single source of truth: derive every window's balance from the fixed base (loan.balance),
+  // carrying any overpayment forward as a negative (credit) into the next window.
+  function computeWaterfall(loan){
+    const rows = data.periods.filter(p=>p.loan_id===loan.id).sort(sortPeriods);
+    let running = Number(loan.balance||0);            // fixed base / arrears = starting point
+    const calc = rows.map(p=>{
+      const accrual  = p.period==='end' ? Number(loan.installment||0) : 0;   // amortization only on the 30th
+      const startBal = running;
+      const totalDue = startBal + accrual;
+      const payment  = p.status==='paid' ? Number(p.paid_amount||0) : Number(p.planned_payment||0);
+      const after    = totalDue - payment;             // NO clamp: negative = credit rolled forward
+      running = after;
+      return { p, accrual, startBal, totalDue, payment, after };
+    });
+    return { calc, finalBalance: running };
+  }
+
   function renderLoans(){
     const wrap = $('#loanBody');
     if(!data.loans.length){ wrap.innerHTML=emptyState('No loans yet','Add a balance you are paying down. Each pay period it stays due until cleared, and whatever is left rolls into the next period.'); return; }
@@ -663,11 +680,14 @@ const App = (() => {
       data.loans.forEach(loan => {
         const rows = data.periods.filter(p=>p.loan_id===loan.id).sort(sortPeriods);
         const activePlanCount = rows.filter(p => p.status !== 'paid' && Number(p.planned_payment) > 0).length;
+        const finalBal = computeWaterfall(loan).finalBalance;
+        const remTxt = finalBal > 0 ? 'Remaining: '+money(finalBal) : finalBal < 0 ? 'Credit ahead: '+money(-finalBal) : 'Cleared 🎉';
+        const remCls = finalBal > 0 ? 'warn' : 'good';
         html += `<div class="card" style="border-left: 6px solid var(--accent); padding:16px; background:var(--card)">
           <div class="row">
             <h3 style="font-size:18px; color:var(--ink)">${esc(loan.name)}</h3>
             <div class="spacer"></div>
-            <span class="pill warn" style="font-size:13px; padding:4px 10px;">Remaining: ${money(loan.balance)}</span>
+            <span class="pill ${remCls}" style="font-size:13px; padding:4px 10px;">${remTxt}</span>
           </div>
           <p class="muted" style="font-size:13px; margin:6px 0 14px 0;">
             Installment: <b>${money(loan.installment)}/mo</b> ${loan.notes ? `· ${esc(loan.notes)}` : ''}
@@ -690,7 +710,7 @@ const App = (() => {
     if(!loan) { activeLoanId = null; renderLoans(); return; }
 
     const rows = data.periods.filter(p=>p.loan_id===loan.id).sort(sortPeriods);
-    let currentRunningBalance = Number(loan.balance || 0);
+    const { calc } = computeWaterfall(loan);
 
     let html = `<div style="margin-bottom:16px;">
       <button class="btn line tiny" style="background:var(--card); font-weight:700; padding:8px 12px; margin-bottom:12px;" onclick="App.closeLoanLedger()">⬅️ Back to Loans Dashboard</button>
@@ -706,18 +726,16 @@ const App = (() => {
       </div>
     </div>`;
 
-    rows.forEach((p, index) => {
-      let addedInstallment = 0;
-      if (p.period === 'end') {
-        addedInstallment = Number(loan.installment || 0);
-      }
-
-      const startingBalanceThisPeriod = currentRunningBalance;
-      const totalStackedDue = startingBalanceThisPeriod + addedInstallment;
-      const effectivePayment = p.status === 'paid' ? Number(p.paid_amount || 0) : Number(p.planned_payment || 0);
-      const projectedBalanceAfter = Math.max(0, totalStackedDue - effectivePayment);
-      
-      currentRunningBalance = projectedBalanceAfter;
+    calc.forEach((c, index) => {
+      const p = c.p;
+      const startingBalanceThisPeriod = c.startBal;
+      const addedInstallment = c.accrual;
+      const totalStackedDue = c.totalDue;
+      const effectivePayment = c.payment;
+      const projectedBalanceAfter = c.after;            // negative = credit carried forward
+      const isCredit = projectedBalanceAfter < 0;
+      const startIsCredit = startingBalanceThisPeriod < 0;
+      const payDefault = Math.max(0, totalStackedDue);
 
       const overdue = p.status !== 'paid' && p.due_date && p.due_date < todayStr();
       const cls = p.status === 'paid' ? 'good' : effectivePayment > 0 ? 'warn' : 'gray';
@@ -732,28 +750,31 @@ const App = (() => {
         </div>
         
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px 24px; margin-top:12px; font-size:13px; border-top:1px dashed var(--line); padding-top:12px;">
-          <div class="row"><span class="muted">Starting Balance:</span><div class="spacer"></div><span>${money(startingBalanceThisPeriod)}</span></div>
-          <div class="row"><span class="muted">New Monthly Accrual:</span><div class="spacer"></div><span style="color:${addedInstallment > 0 ? 'var(--warn)' : 'var(--muted)'}">+ ${money(addedInstallment)}</span></div>
+          <div class="row"><span class="muted">Starting Balance:</span><div class="spacer"></div><span style="color:${startIsCredit?'var(--good)':'inherit'}">${startIsCredit?('Credit '+money(-startingBalanceThisPeriod)):money(startingBalanceThisPeriod)}</span></div>
+          ${addedInstallment > 0
+            ? `<div class="row"><span class="muted">Amortization (30th):</span><div class="spacer"></div><span style="color:var(--warn)">+ ${money(addedInstallment)}</span></div>`
+            : `<div class="row"><span class="muted">Amortization:</span><div class="spacer"></div><span class="muted" style="font-size:12px">— 30th only</span></div>`}
           <div class="row" style="grid-column: 1 / -1; background:var(--bg); padding:6px 10px; border-radius:8px; border:1px solid var(--line)">
-            <span class="muted"><b>Total Due This Window:</b></span><div class="spacer"></div><b>${money(totalStackedDue)}</b>
+            <span class="muted"><b>Total Due This Window:</b></span><div class="spacer"></div><b>${money(Math.max(0, totalStackedDue))}</b>
           </div>
           <div class="row"><span class="muted">Your Plan Allocation:</span><div class="spacer"></div><b style="color:var(--accent)">${money(p.planned_payment)}</b></div>
           <div class="row"><span class="muted">Actual Paid:</span><div class="spacer"></div><b style="color:var(--good)">${money(p.paid_amount)}</b></div>
         </div>
 
         <div class="row" style="margin-top:14px; background:var(--bg); padding:8px 12px; border-radius:8px; border:1px solid var(--line)">
-          <span class="muted"><b>Projected Balance After:</b></span>
+          <span class="muted"><b>${isCredit ? 'Credit Carried Forward:' : 'Projected Balance After:'}</b></span>
           <div class="spacer"></div>
-          <b style="font-size:15px; color:${projectedBalanceAfter > 0 ? 'var(--warn)' : 'var(--good)'}">${money(projectedBalanceAfter)}</b>
+          <b style="font-size:15px; color:${isCredit ? 'var(--good)' : projectedBalanceAfter > 0 ? 'var(--warn)' : 'var(--good)'}">${isCredit ? money(-projectedBalanceAfter) : money(projectedBalanceAfter)}</b>
         </div>
+        ${isCredit ? `<div class="muted" style="font-size:12px; margin-top:6px; color:var(--good)">↪ Overpayment of ${money(-projectedBalanceAfter)} rolls into the next pay window.</div>` : ''}
 
         <div class="row" style="gap:6px; margin-top:12px; flex-wrap:wrap">
           ${p.status !== 'paid'
             ? `<button class="btn ghost tiny" onclick="App.planForm('${p.id}')">✏️ Set/Edit Plan</button>
-               <button class="btn tiny" onclick="App.payForm('${p.id}', ${totalStackedDue})">✅ Log Payment</button>`
+               <button class="btn tiny" onclick="App.payForm('${p.id}', ${payDefault})">✅ Log Payment</button>`
             : `<button class="btn line tiny" onclick="App.unpayPeriod('${p.id}')">↩️ Undo Payment</button>`}
           <button class="btn line tiny" onclick="App.remindLoan('${p.id}')">🔔 Remind</button>
-          ${index === rows.length - 1 ? `<button class="btn line tiny" onclick="App.extendNextPeriod('${loan.id}', '${p.month}', '${p.period}')">➕ Map Next Period</button>` : ''}
+          ${index === calc.length - 1 ? `<button class="btn line tiny" onclick="App.extendNextPeriod('${loan.id}', '${p.month}', '${p.period}')">➕ Map Next Period</button>` : ''}
           <button class="btn line tiny" style="color:var(--bad)" onclick="App.delPeriod('${p.id}')">✕ Remove Window</button>
         </div>
       </div>`;
@@ -829,25 +850,19 @@ const App = (() => {
   async function confirmPay(id){
     const p=data.periods.find(x=>x.id===id), loan=data.loans.find(l=>l.id===p.loan_id);
     const paid=parseFloat($('#f_paid').value)||0;
-    
-    let monthlyInstallmentImpact = p.period === 'end' ? Number(loan.installment || 0) : 0;
-    const trueCurrentAssetDue = Number(loan.balance) + monthlyInstallmentImpact;
-    const remainingAssetBalance = Math.max(0, trueCurrentAssetDue - paid);
 
-    await upd('loan_periods',id,{paid_amount:paid,status:'paid',balance_after:remainingAssetBalance},data.periods);
-    await upd('loans',loan.id,{balance:remainingAssetBalance},data.loans);
+    // Base balance stays fixed; the waterfall derives the running balance and carries any overpayment forward.
+    await upd('loan_periods',id,{paid_amount:paid,status:'paid'},data.periods);
     await syncLoanToBudget(data.periods.find(x=>x.id===id),loan);
-    
+
     closeSheet(); renderLoans();
-    toast(remainingAssetBalance > 0 ? 'Payment locked — calculation waterfall shifted!' : 'Loan completely cleared! 🎉');
+    const fb = computeWaterfall(loan).finalBalance;
+    toast(fb > 0 ? 'Payment locked — waterfall recalculated!' : fb < 0 ? 'Paid ahead — '+money(-fb)+' credit carried forward! 🎉' : 'Loan completely cleared! 🎉');
   }
 
   async function unpayPeriod(id){
     const p=data.periods.find(x=>x.id===id), loan=data.loans.find(l=>l.id===p.loan_id);
-    let monthlyInstallmentImpact = p.period === 'end' ? Number(loan.installment || 0) : 0;
-    const restored = Number(loan.balance) + Number(p.paid_amount) - monthlyInstallmentImpact;
-    await upd('loan_periods',id,{paid_amount:0,status:'planned',balance_after:restored},data.periods);
-    await upd('loans',loan.id,{balance:Math.max(0, restored)},data.loans);
+    await upd('loan_periods',id,{paid_amount:0,status:'planned'},data.periods);
     await syncLoanToBudget(data.periods.find(x=>x.id===id),loan);
     renderLoans();
   }
