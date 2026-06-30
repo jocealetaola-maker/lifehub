@@ -272,6 +272,7 @@
 const App = (() => {
   let sb=null, tab='shopping', period='mid';
   let activeLoanId = null;
+  let recurringView = false;
   let month = new Date().toISOString().slice(0,7); // YYYY-MM
   const LS = { url:'lh_url', key:'lh_key' };
 
@@ -490,6 +491,7 @@ const App = (() => {
   function go(t){
     tab=t;
     if(t==='loans') activeLoanId = null;
+    recurringView = false;
     document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
     $('#tab-'+t).classList.add('active');
     document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));
@@ -597,6 +599,7 @@ const App = (() => {
   function periodsActive(){ return [period]; }
 
   function renderBudget(){
+    if(recurringView){ renderRecurringPage(); return; }
     $('#monthLabel').textContent=monthName(month);
     $('#budgetHint').textContent = 'Pay periods: 15th & 30th';
     const ps=periodsActive();
@@ -637,13 +640,37 @@ const App = (() => {
         <div class="stat good"><div class="k">Suggested savings (${S.savingsPct}%)</div><div class="v">${money(savings)}</div></div>
         <div class="stat"><div class="k">Income</div><div class="v">${money(totIncome)}</div></div>
         <div class="stat"><div class="k">Paid + planned</div><div class="v">${money(totPaid+totPlanned)}</div></div>
-      </div>${recurringSection()}` + html;
+      </div>` + html + recurringEntryCard();
     $('#budgetBody').innerHTML=html;
   }
 
-  /* ----- Recurring charges manager (lives in Budget) ----- */
-  function recurringSection(){
+  /* ----- Recurring charges: compact entry (bottom of Budget) + its own page ----- */
+  function recurringMonthlyTotals(){
+    let mid=0,end=0;
+    data.recurring.filter(r=>r.active!==false).forEach(r=>{ if(r.period==='mid')mid+=Number(r.amount||0); else end+=Number(r.amount||0); });
+    return {mid,end,total:mid+end};
+  }
+  function recurringEntryCard(){
+    const n=data.recurring.length;
+    const t=recurringMonthlyTotals();
+    return `<div class="group-title" style="margin-top:22px">Recurring</div>
+      <div class="card" onclick="App.openRecurring()" style="cursor:pointer;display:flex;align-items:center;gap:12px">
+        <div style="font-size:22px">🔁</div>
+        <div style="flex:1">
+          <div style="font-weight:700">Recurring charges</div>
+          <div class="muted" style="font-size:12px">${n} item${n===1?'':'s'} · ${money(t.total)}/mo (15th ${money(t.mid)} · 30th ${money(t.end)})</div>
+        </div>
+        <div style="font-size:22px;color:var(--muted)">›</div>
+      </div>`;
+  }
+  function openRecurring(){ recurringView=true; renderBudget(); window.scrollTo(0,0); }
+  function closeRecurring(){ recurringView=false; renderBudget(); window.scrollTo(0,0); }
+
+  function renderRecurringPage(){
+    $('#monthLabel').textContent=monthName(month);
+    $('#budgetHint').textContent='Recurring charges';
     const list = data.recurring.slice().sort((a,b)=>(a.period+a.name).localeCompare(b.period+b.name));
+    const t=recurringMonthlyTotals();
     let inner='';
     if(!list.length){ inner=`<p class="muted" style="font-size:13px;padding:4px 2px">No recurring charges yet — add rent, bills, subscriptions…</p>`; }
     else inner = list.map(r=>{
@@ -658,12 +685,20 @@ const App = (() => {
         <button class="icon-btn" onclick="App.editRecurringForm('${r.id}')">✏️</button>
         <button class="icon-btn del" onclick="App.askDelRecurring('${r.id}')">✕</button></div>`;
     }).join('');
-    return `<div class="group-title" style="margin-top:18px">🔁 Recurring charges <span class="count">${list.length}</span></div>
+    const html=`
+      <button class="btn line tiny" style="margin-bottom:12px" onclick="App.closeRecurring()">‹ Back to budget</button>
+      <div class="panel-head" style="margin-bottom:10px"><h2 style="font-size:20px">🔁 Recurring charges</h2></div>
+      <div class="summary" style="margin-bottom:4px">
+        <div class="stat"><div class="k">15th / month</div><div class="v">${money(t.mid)}</div></div>
+        <div class="stat"><div class="k">30th / month</div><div class="v">${money(t.end)}</div></div>
+        <div class="stat big"><div class="k">Total recurring / month</div><div class="v">${money(t.total)}</div></div>
+      </div>
       <div class="card">
         <div class="row" style="margin-bottom:8px"><span class="muted" style="font-size:12px">Auto-added as planned each month within their timeframe</span><div class="spacer"></div>
           <button class="btn ghost tiny" onclick="App.recurringForm()">+ Add recurring</button></div>
         ${inner}
       </div>`;
+    $('#budgetBody').innerHTML=html;
   }
   function recurringForm(){ openRecurringSheet(null); }
   function editRecurringForm(id){ openRecurringSheet(data.recurring.find(r=>r.id===id)); }
@@ -1234,7 +1269,7 @@ const App = (() => {
   function emptyState(b,p){ return `<div class="empty"><b>${b}</b>${p}</div>`; }
 
   /* ----- FAB router ----- */
-  function fab(){ ({shopping:shopForm,budget:expenseForm,loans:loanForm,notes:()=>noteForm(),calendar:()=>noteForm(calSel||todayStr())}[tab]||(()=>{}))(); }
+  function fab(){ if(tab==='budget'&&recurringView){ recurringForm(); return; } ({shopping:shopForm,budget:expenseForm,loans:loanForm,notes:()=>noteForm(),calendar:()=>noteForm(calSel||todayStr())}[tab]||(()=>{}))(); }
 
   /* ----- init ----- */
   function init(){
@@ -1247,7 +1282,7 @@ const App = (() => {
     toggleShop, delShop, shopForm, editShopForm, saveShop, onShopImg, clearShopImg,
     setPeriod, shiftMonth, renderBudget, incomeForm, saveIncome, delInc,
     incomeAddForm, editIncomeForm, saveIncomeLine, delIncomeLine,
-    recurringForm, editRecurringForm, saveRecurring, askDelRecurring,
+    recurringForm, editRecurringForm, saveRecurring, askDelRecurring, openRecurring, closeRecurring,
     expenseForm, addExp, toggleExp, delExp,
     noteForm, editNoteForm, saveNote, delNote,
     calShift, calPick,
