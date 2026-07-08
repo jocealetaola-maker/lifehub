@@ -1392,14 +1392,15 @@ const App = (() => {
 
   /* ----- Admin: approve / reject payments ----- */
   async function approvePayment(id, userId){
+    alert('① Approve tapped\nuser: '+userId);
     try{
       const { error } = await sb.from('access').upsert({ user_id:userId, paid:true, paid_at:new Date().toISOString() }, { onConflict:'user_id' }).select();
-      if(error){ alert('Approve failed (access): '+error.message); return; }
+      if(error){ alert('❌ access error: '+error.message); return; }
       const r = await sb.from('payment_submissions').update({ status:'approved' }).eq('id',id);
-      if(r.error){ alert('Approve failed (status): '+r.error.message); return; }
+      if(r.error){ alert('❌ status error: '+r.error.message); return; }
       const s=data.submissions.find(x=>x.id===id); if(s)s.status='approved';
-      renderSettings(); toast('Approved & unlocked ✓');
-    }catch(e){ alert('Approve error: '+((e&&e.message)||e)); }
+      renderSettings(); alert('✅ Approved & unlocked');
+    }catch(e){ alert('❌ error: '+((e&&e.message)||e)); }
   }
   async function rejectPayment(id){
     try{
