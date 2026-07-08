@@ -132,17 +132,18 @@
   table.pay td{padding:9px 6px;border-bottom:1px solid var(--line);vertical-align:middle}
   table.pay td.num{text-align:right;font-variant-numeric:tabular-nums}
 
-  /* bottom nav */
+  /* calendar */
   .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
   .cal .dow{font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);text-align:center;padding:4px 0}
-  .cal .day{aspect-ratio:1;border:1px solid var(--line);border-radius:9px;display:flex;flex-direction:column;align-items:center;padding:5px 0 0;font-size:13px;background:var(--card)}
-  .cal .day.out{opacity:0;border:none;background:none}
+  .cal .day{aspect-ratio:1;border:1px solid var(--line);border-radius:9px;display:flex;flex-direction:column;align-items:center;padding:5px 0 0;font-size:13px;background:var(--card);cursor:pointer}
+  .cal .day.out{opacity:0;border:none;background:none;pointer-events:none}
   .cal .day.today{border-color:var(--accent);border-width:2px;font-weight:800}
   .cal .day.sel{background:var(--accent-soft)}
   .cal .day .dots{display:flex;gap:3px;margin-top:3px;min-height:6px}
   .cal .day .dot,.dot{width:6px;height:6px;border-radius:50%}
   .dot.pay{background:var(--bad)} .dot.note{background:var(--accent)}
 
+  /* bottom nav */
   nav.tabs{
     position:fixed;left:0;right:0;bottom:0;z-index:40;
     background:color-mix(in srgb, var(--card) 92%, transparent);
@@ -245,7 +246,7 @@
       <button onclick="App.calShift(1)">›</button>
     </div>
     <div id="calBody"></div>
-    <div id="calDay"></div>
+    <div id="calDay" style="margin-top:16px"></div>
   </section>
 
   <section id="tab-loans" class="tab-panel">
@@ -278,9 +279,10 @@ const App = (() => {
   let activeLoanId = null;
   let recurringView = false;
   let month = new Date().toISOString().slice(0,7); // YYYY-MM
-  const LS = { url:'lh_url', key:'lh_key' };
+  let calMonth = new Date().toISOString().slice(0,7);
+  let calSel = null;
+  let activeShopImg = null;
 
-  // default settings (stored in app_settings.data)
   const DEFAULTS = {
     accent:'#7c6f9c', bg:'#faf7f2', font:'Manrope', currency:'₱',
     payMid:15, payEnd:30, savingsPct:20,
@@ -291,13 +293,16 @@ const App = (() => {
 
   const data = { shopping:[], incomes:[], expenses:[], recurring:[], notes:[], loans:[], payments:[], periods:[], submissions:[] };
 
-  /* ---------- helpers ---------- */
   const $ = s => document.querySelector(s);
   const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   const money = n => S.currency + Number(n||0).toLocaleString(undefined,{maximumFractionDigits:2});
   const todayStr = () => new Date().toISOString().slice(0,10);
   const monthName = ym => { const [y,m]=ym.split('-'); return new Date(y,m-1,1).toLocaleString(undefined,{month:'long',year:'numeric'}); };
-  function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),2200); }
+  
+  function toast(msg){ 
+    const t=$('#toast'); t.textContent=msg; t.classList.add('show'); 
+    clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),2200); 
+  }
 
   function applyTheme(){
     const r=document.documentElement.style;
@@ -307,10 +312,12 @@ const App = (() => {
     r.setProperty('--font', `'${S.font}', system-ui, sans-serif`);
     loadFont(S.font);
   }
-  function mix(hex,white,t){ // simple tint
+  
+  function mix(hex,white,t){
     const h=hex.replace('#',''); const r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4,6),16);
     const m=c=>Math.round(c+(255-c)*t); return `rgb(${m(r)},${m(g)},${m(b)})`;
   }
+  
   const loadedFonts=new Set();
   function loadFont(f){
     if(['system-ui','-apple-system'].includes(f)||loadedFonts.has(f))return;
@@ -320,7 +327,26 @@ const App = (() => {
     document.head.appendChild(l);
   }
 
-  /* ---------- download ICS Helper (Used for Loan Reminders) ---------- */
+  function compressImage(file, callback) {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = event => {
+      const img = new Image();
+      img.src = event.target.result;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const max = 400;
+        let w = img.width, h = img.height;
+        if(w > h) { if(w > max) { h *= max/w; w = max; } }
+        else { if(h > max) { w *= max/h; h = max; } }
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        callback(canvas.toDataURL('image/jpeg', 0.7));
+      };
+    };
+  }
+
   function downloadICS(title, dateStr, timeStr, notes){
     if(!dateStr){ toast('Add a due date first'); return; }
     const dt = new Date(`${dateStr}T${timeStr||'09:00'}:00`);
@@ -336,9 +362,8 @@ const App = (() => {
     ].filter(Boolean).join('\r\n');
     const dataUri = 'data:text/calendar;charset=utf-8,' + encodeURIComponent(ics);
     const isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
-    if(isiOS){
-      window.location.href = dataUri;
-    } else {
+    if(isiOS){ window.location.href = dataUri; } 
+    else {
       const a=document.createElement('a'); a.href=dataUri;
       a.download=(title||'reminder').replace(/[^a-z0-9]/gi,'_').slice(0,30)+'.ics';
       document.body.appendChild(a); a.click(); a.remove();
@@ -346,24 +371,20 @@ const App = (() => {
     toast('Opening reminder — tap Add in Calendar');
   }
 
-  /* ---------- supabase connection + auth ---------- */
   let uid=null, authEmail=null, authMode='login';
-
-  // ===== ACCESS / PAYMENTS =====
   let paid=false;
   let pendingPayImg=null;
-  const ADMIN_UID = "16ef37a8-58a1-4c75-9c92-21ab0d28a06f";   // your account = only admin
+  const ADMIN_UID = "16ef37a8-58a1-4c75-9c92-21ab0d28a06f";
   const isAdmin = () => uid === ADMIN_UID;
-  // ---- EDIT THESE with your real details (shown to buyers on the paywall) ----
+  
   const PAY = {
-    price:       "₱30",              // display text for the one-time price
-    gcashNumber: "0951 751 6681",    // your GCash number
-    gcashName:   "John Bryan Julieza",// your GCash account name
-    bank:        "",                 // optional e.g. "BPI 1234-5678-90 (Your Name)"; "" hides it
-    qrUrl:       ""                  // optional: URL/path to your GCash QR image; "" hides it
+    price: "₱30",
+    gcashNumber: "0951 751 6681",
+    gcashName: "John Bryan Julieza",
+    bank: "",
+    qrUrl: ""
   };
 
-  // Your Supabase project (safe to ship publicly now that per-user RLS is on):
   const SUPABASE_URL = "https://chkcpdoolfrfjesfkojn.supabase.co";
   const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNoa2NwZG9vbGZyZmplc2Zrb2puIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzODEzNDgsImV4cCI6MjA5Nzk1NzM0OH0.SpJ2LrftcoGoF0VL0DJ9cMCHXHv03qnPj8xB5SvoHOE";
 
@@ -381,6 +402,7 @@ const App = (() => {
     $('#auth').style.display='block';
     $('#syncState').textContent='Please log in';
   }
+  
   function showApp(){
     $('#auth').style.display='none';
     $('#paywall').style.display='none';
@@ -388,6 +410,7 @@ const App = (() => {
     $('#gearBtn').style.display='inline-flex';
     go('shopping');
   }
+  
   function authToggle(){
     authMode = authMode==='login' ? 'signup' : 'login';
     const login = authMode==='login';
@@ -397,6 +420,7 @@ const App = (() => {
     $('#authToggleLink').textContent = login ? 'Create an account' : 'Log in instead';
     $('#auPass').setAttribute('autocomplete', login?'current-password':'new-password');
   }
+  
   async function authSubmit(){
     const email=$('#auEmail').value.trim(), pass=$('#auPass').value;
     if(!email||!pass){ toast('Email and password required'); return; }
@@ -406,7 +430,7 @@ const App = (() => {
       if(authMode==='signup'){
         const { data, error } = await sb.auth.signUp({ email, password: pass });
         if(error) throw error;
-        if(!data.session){ // email confirmation still on
+        if(!data.session){
           toast('Account created — check your email to confirm, then log in.');
           authMode='login'; authToggle(); authToggle(); $('#auBtn').textContent='Log in'; return;
         }
@@ -419,8 +443,8 @@ const App = (() => {
       toast(e.message || 'Could not sign in');
       $('#auBtn').textContent = authMode==='login'?'Log in':'Sign up';
     }
-    // onAuthStateChange handles the rest
   }
+  
   async function doLogout(){
     await sb.auth.signOut();
     uid=null; authEmail=null; paid=false;
@@ -429,7 +453,6 @@ const App = (() => {
     showAuth();
   }
 
-  // Decide whether to show the full app or the paywall
   async function gateAndLoad(){
     $('#syncState').textContent='Checking access…';
     try{
@@ -450,6 +473,7 @@ const App = (() => {
     $('#syncState').textContent='Locked';
     renderPaywall();
   }
+  
   async function renderPaywall(){
     let sub=null;
     try{
@@ -498,8 +522,12 @@ const App = (() => {
       </div>`;
     $('#paywallBody').innerHTML=html;
   }
-  function onPayProof(input){ const f=input.files&&input.files[0]; if(!f)return;
-    compressImage(f, url=>{ pendingPayImg=url; const pv=$('#proofPreview'); if(pv) pv.style.backgroundImage=`url('${url}')`; }); }
+  
+  function onPayProof(input){ 
+    const f=input.files&&input.files[0]; if(!f)return;
+    compressImage(f, url=>{ pendingPayImg=url; const pv=$('#proofPreview'); if(pv) pv.style.backgroundImage=`url('${url}')`; }); 
+  }
+  
   async function submitPayment(){
     const reference=$('#pay_ref').value.trim();
     if(!reference){ toast('Enter your GCash reference number'); return; }
@@ -511,6 +539,7 @@ const App = (() => {
     toast('Submitted! You\'ll be unlocked once confirmed.');
     renderPaywall();
   }
+  
   async function refreshAccess(){ await gateAndLoad(); }
 
   async function bootstrap(){
@@ -531,19 +560,16 @@ const App = (() => {
   async function loadAll(){
     $('#syncState').textContent='Syncing…';
     try{
-      // settings (one row per user; RLS scopes it to me)
       let { data:set } = await sb.from('app_settings').select('*').maybeSingle();
       if(set && set.data) S={...DEFAULTS, ...set.data};
-      else await sb.from('app_settings').insert({ data:S });   // user_id auto-stamped by DB default
+      else await sb.from('app_settings').insert({ data:S });
       applyTheme();
 
-      // Safe grab helper that won't completely crash if sorting fails
       const grab = async (t, orderField) => { 
         let query = sb.from(t).select('*');
         if (orderField) query = query.order(orderField, { ascending: true });
         const { data: d, error } = await query;
         if (error) {
-          console.warn(`Fallback fetch for table ${t}:`, error);
           const { data: retryData } = await sb.from(t).select('*');
           return retryData || [];
         }
@@ -557,8 +583,6 @@ const App = (() => {
       data.notes    = await grab('notes', 'created_at');
       data.loans    = await grab('loans', 'created_at');
       try { data.submissions = await grab('payment_submissions', 'created_at'); } catch(e){ data.submissions = []; }
-      
-      // Fallback safe fetches for loan attachments
       try { data.payments = await grab('loan_payments'); } catch(e) { data.payments = []; }
       try { data.periods  = await grab('loan_periods'); } catch(e) { data.periods = []; }
 
@@ -568,16 +592,15 @@ const App = (() => {
     }catch(e){
       console.error(e);
       $('#syncState').textContent='Sync error';
-      toast('Sync error — check tables/keys');
+      toast('Sync error — check configurations');
     }
   }
 
-  // create planned expense rows for active recurring templates for the visible month
   async function autoLogRecurring(){
     const adds=[];
     for(const r of data.recurring.filter(x=>x.active!==false)){
-      if(r.start_month && month < r.start_month) continue;   // not started yet
-      if(r.end_month   && month > r.end_month)   continue;   // already ended
+      if(r.start_month && month < r.start_month) continue;
+      if(r.end_month   && month > r.end_month)   continue;
       const exists = data.expenses.some(e=>e.recurring_id===r.id && e.month===month && e.period===r.period);
       if(!exists) adds.push({month, period:r.period, category:r.category, name:r.name, amount:r.amount, status:'planned', is_recurring:true, recurring_id:r.id});
     }
@@ -587,50 +610,57 @@ const App = (() => {
     }
   }
 
-  /* ---------- generic CRUD ---------- */
-  async function ins(t,row,arr){ const {data:d,error}=await sb.from(t).insert(row).select(); if(error){toast('Save failed');return null;} arr.push(d[0]); return d[0]; }
-  async function upd(t,id,patch,arr){ const {error}=await sb.from(t).update(patch).eq('id',id); if(error){toast('Update failed');return;} const o=arr.find(x=>x.id===id); if(o)Object.assign(o,patch); }
-  async function del(t,id,arr){ const {error}=await sb.from(t).delete().eq('id',id); if(error){toast('Delete failed');return;} const i=arr.findIndex(x=>x.id===id); if(i>=0)arr.splice(i,1); }
+  async function ins(t,row,arr){
+    const {data:d,error}=await sb.from(t).insert(row).select();
+    if(error){toast('Save failed');return null;}
+    arr.push(d[0]); return d[0];
+  }
+  async function upd(t,id,patch,arr){
+    const {error}=await sb.from(t).update(patch).eq('id',id);
+    if(error){toast('Update failed');return;}
+    const o=arr.find(x=>x.id===id); if(o)Object.assign(o,patch);
+  }
+  async function del(t,id,arr){
+    const {error}=await sb.from(t).delete().eq('id',id);
+    if(error){toast('Delete failed');return;}
+    const i=arr.findIndex(x=>x.id===id); if(i>=0)arr.splice(i,1);
+  }
 
-  /* ---------- navigation ---------- */
   function go(t){
-    tab=t;
-    if(t==='loans') activeLoanId = null;
-    recurringView = false;
+    tab=t; if(t==='loans') activeLoanId = null; recurringView = false;
     document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
     $('#tab-'+t).classList.add('active');
     document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));
     $('#fab').style.display = (t==='settings')?'none':'grid';
-    window.scrollTo(0,0);
-    render(t);
+    window.scrollTo(0,0); render(t);
   }
 
-  /* ---------- modal ---------- */
   function openSheet(html){ $('#sheet').innerHTML=html; $('#scrim').classList.add('show'); }
   function closeSheet(){ $('#scrim').classList.remove('show'); }
-  $('#scrim').addEventListener('click',e=>{ if(e.target.id==='scrim') closeSheet(); });
-
+  
+  window.addEventListener('DOMContentLoaded', () => {
+    $('#scrim').addEventListener('click',e=>{ if(e.target.id==='scrim') closeSheet(); });
+  });
+  
   function catOptions(list,sel){ return list.map(c=>`<option ${c===sel?'selected':''}>${esc(c)}</option>`).join(''); }
 
-  /* ================= RENDERERS ================= */
   function renderAll(){ render(tab); }
-  function render(t){
-    ({shopping:renderShopping, budget:renderBudget,
-      notes:renderNotes, calendar:renderCalendar, loans:renderLoans, settings:renderSettings}[t]||(()=>{}))();
-  }
+  function render(t){ ({shopping:renderShopping, budget:renderBudget, notes:renderNotes, calendar:renderCalendar, loans:renderLoans, settings:renderSettings}[t]||(()=>{}))(); }
 
   /* ----- Shopping ----- */
   function renderShopping(){
     const wrap=$('#shoppingList');
-    if(!data.shopping.length){ wrap.innerHTML=emptyState('Nothing on the list','Tap + to add your first item — with a price and a photo'); return; }
-    const byCat={};
-    data.shopping.forEach(i=>{ (byCat[i.category]=byCat[i.category]||[]).push(i); });
+    if(!data.shopping.length){
+      wrap.innerHTML=emptyState('Nothing on the list','Tap + to add your first item — with a price and a photo'); return;
+    }
+    const byCat={}; data.shopping.forEach(i=>{ (byCat[i.category]=byCat[i.category]||[]).push(i); });
     const toBuy=data.shopping.filter(i=>!i.bought);
     const totalToBuy=toBuy.reduce((s,i)=>s+Number(i.price||0),0);
     const totalAll=data.shopping.reduce((s,i)=>s+Number(i.price||0),0);
     let html=`<div class="summary">
-      <div class="stat ${'good'}"><div class="k">To-buy total</div><div class="v">${money(totalToBuy)}</div></div>
+      <div class="stat good"><div class="k">To-buy total</div><div class="v">${money(totalToBuy)}</div></div>
       <div class="stat"><div class="k">List total</div><div class="v">${money(totalAll)}</div></div></div>`;
+    
     Object.keys(byCat).sort().forEach(cat=>{
       const items=byCat[cat].sort((a,b)=>a.bought-b.bought);
       const left=items.filter(i=>!i.bought).length;
@@ -641,780 +671,618 @@ const App = (() => {
         html+=`<div class="item ${i.bought?'done':''}">
           <button class="check ${i.bought?'on':''}" onclick="App.toggleShop('${i.id}')">${i.bought?'✓':''}</button>
           ${i.image?`<img src="${i.image}" alt="" style="width:44px;height:44px;border-radius:10px;object-fit:cover;flex:none" onclick="App.editShopForm('${i.id}')" />`:''}
-          <div class="body"><div class="title">${esc(i.name)}</div>${meta?`<div class="meta">${meta}</div>`:''}</div>
-          <div class="acts">
-            <button class="icon-btn" onclick="App.editShopForm('${i.id}')">✏️</button>
-            <button class="icon-btn del" onclick="App.delShop('${i.id}')">✕</button></div>
+          <div class="body"><div class="title" onclick="App.editShopForm('${i.id}')">${esc(i.name)}</div>${meta?`<div class="meta">${meta}</div>`:''}</div>
+          <div class="acts"><button class="icon-btn del" onclick="App.delShop('${i.id}')">✕</button></div>
         </div>`;
       });
-      html+='</div>';
+      html+=`</div>`;
     });
     wrap.innerHTML=html;
   }
-  async function toggleShop(id){ const i=data.shopping.find(x=>x.id===id); await upd('shopping_items',id,{bought:!i.bought},data.shopping); renderShopping(); }
-  async function delShop(id){ await del('shopping_items',id,data.shopping); renderShopping(); }
-
-  // shrink any picked photo to a small thumbnail data URL so sync stays light
-  function compressImage(file, cb){
-    const reader=new FileReader();
-    reader.onload=e=>{ const img=new Image();
-      img.onload=()=>{ const max=420; const scale=Math.min(1, max/Math.max(img.width,img.height));
-        const w=Math.round(img.width*scale), h=Math.round(img.height*scale);
-        const c=document.createElement('canvas'); c.width=w; c.height=h;
-        c.getContext('2d').drawImage(img,0,0,w,h);
-        cb(c.toDataURL('image/jpeg',0.72)); };
-      img.src=e.target.result; };
-    reader.readAsDataURL(file);
+  
+  async function toggleShop(id){
+    const i=data.shopping.find(x=>x.id===id); if(!i)return;
+    const next=!i.bought; await upd('shopping_items',id,{bought:next},data.shopping); renderShopping();
   }
-  let pendingShopImg=null;
-  function shopForm(){ openShopSheet(null); }
-  function editShopForm(id){ openShopSheet(data.shopping.find(i=>i.id===id)); }
-  function openShopSheet(it){
-    const isEdit=!!it; pendingShopImg = isEdit ? (it.image||null) : null;
-    openSheet(`<h3>${isEdit?'Edit':'Add'} grocery item</h3>
-      <div class="field"><label>Item</label><input id="f_name" value="${isEdit?esc(it.name):''}" placeholder="e.g. Coffee beans" /></div>
-      <div class="field two"><div><label>Category</label><select id="f_cat">${catOptions(S.cat_shopping, isEdit?it.category:S.cat_shopping[0])}</select></div>
-      <div><label>Price (₱)</label><input id="f_price" type="number" inputmode="decimal" value="${isEdit&&Number(it.price)>0?it.price:''}" placeholder="0" /></div></div>
-      <div class="field"><label>Quantity / note</label><input id="f_qty" value="${isEdit?esc(it.qty||''):''}" placeholder="optional" /></div>
-      <div class="field"><label>Photo</label>
-        <div class="row" style="gap:12px;align-items:center">
-          <div id="imgPreview" style="width:64px;height:64px;border-radius:12px;border:1px solid var(--line);background:var(--bg) center/cover no-repeat;flex:none;${pendingShopImg?`background-image:url('${pendingShopImg}')`:''}"></div>
-          <div style="flex:1">
-            <input type="file" accept="image/*" id="f_img" onchange="App.onShopImg(this)" style="font-size:13px" />
-            <button class="btn line tiny" style="margin-top:6px" onclick="App.clearShopImg()">Remove photo</button>
-          </div>
-        </div></div>
-      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.saveShop(${isEdit?`'${it.id}'`:'null'})">${isEdit?'Save':'Add item'}</button></div>`);
-    setTimeout(()=>$('#f_name').focus(),100);
+  
+  async function delShop(id){ if(confirm('Delete item?')){ await del('shopping_items',id,data.shopping); renderShopping(); } }
+  
+  function shopForm(){ activeShopImg=null; editShopForm(null); }
+  
+  function editShopForm(id){
+    const i=id?data.shopping.find(x=>x.id===id):null;
+    activeShopImg=i?i.image:null;
+    openSheet(`
+      <h3>${i?'Edit Item':'Add to Shopping List'}</h3>
+      <div class="field"><label>Item Name</label><input id="f_name" value="${i?esc(i.name):''}" placeholder="e.g. Organic Milk" /></div>
+      <div class="field"><label>Category</label><select id="f_cat">${catOptions(S.cat_shopping,i?.category||S.cat_shopping[0])}</select></div>
+      <div class="field two">
+        <div><label>Qty / Size</label><input id="f_qty" value="${i?esc(i.qty):''}" placeholder="e.g. 2 packs" /></div>
+        <div><label>Est Price</label><input id="f_price" type="number" step="any" value="${i?i.price||'':''}" placeholder="0.00" /></div>
+      </div>
+      <div class="field"><label>Photo Attachment</label>
+        <div class="row">
+          <div id="shopPreview" style="width:64px;height:64px;border-radius:10px;border:1px solid var(--line);background:var(--bg) center/cover no-repeat;backgroundImage:${activeShopImg?`url('${activeShopImg}')`:''}"></div>
+          <input type="file" accept="image/*" onchange="App.onShopImg(this)" style="font-size:13px" />
+          ${activeShopImg?`<button class="btn line tiny" onclick="App.clearShopImg()">Remove</button>`:''}
+        </div>
+      </div>
+      <div class="sheet-acts">
+        <button class="btn line" onclick="App.closeSheet()">Cancel</button>
+        <button class="btn" onclick="App.saveShop('${id||''}')">Save</button>
+      </div>`);
   }
-  function onShopImg(input){ const f=input.files&&input.files[0]; if(!f)return;
-    compressImage(f, url=>{ pendingShopImg=url; const pv=$('#imgPreview'); if(pv) pv.style.backgroundImage=`url('${url}')`; }); }
-  function clearShopImg(){ pendingShopImg=null; const pv=$('#imgPreview'); if(pv) pv.style.backgroundImage=''; const fi=$('#f_img'); if(fi) fi.value=''; }
+  
+  function onShopImg(input){
+    const f=input.files&&input.files[0]; if(!f)return;
+    compressImage(f, url=>{ activeShopImg=url; const pv=$('#shopPreview'); if(pv) pv.style.backgroundImage=`url('${url}')`; });
+  }
+  function clearShopImg(){ activeShopImg=null; const pv=$('#shopPreview'); if(pv) pv.style.backgroundImage=''; }
+  
   async function saveShop(id){
-    const name=$('#f_name').value.trim(); if(!name){toast('Name needed');return;}
-    const patch={ name, category:$('#f_cat').value, qty:$('#f_qty').value.trim(), price:parseFloat($('#f_price').value)||0, image:pendingShopImg||null };
-    if(id){ await upd('shopping_items', id, patch, data.shopping); }
-    else { patch.bought=false; await ins('shopping_items', patch, data.shopping); }
-    pendingShopImg=null; closeSheet(); renderShopping();
+    const name=$('#f_name').value.trim(), category=$('#f_cat').value;
+    if(!name){ toast('Name required'); return; }
+    const row={name, category, qty:$('#f_qty').value.trim(), price:Number($('#f_price').value)||0, image:activeShopImg};
+    if(id){ await upd('shopping_items',id,row,data.shopping); }
+    else { row.bought=false; await ins('shopping_items',row,data.shopping); }
+    closeSheet(); renderShopping();
   }
 
   /* ----- Budget ----- */
-  function setPeriod(p){ period=p; document.querySelectorAll('#periodSeg button').forEach(b=>b.classList.toggle('on',b.dataset.p===p)); renderBudget(); }
-  function shiftMonth(d){ const dt=new Date(month+'-01'); dt.setMonth(dt.getMonth()+d); month=dt.toISOString().slice(0,7); autoLogRecurring().then(renderBudget); }
-  function periodsActive(){ return [period]; }
-
   function renderBudget(){
-    if(recurringView){ renderRecurringPage(); return; }
-    $('#monthLabel').textContent=monthName(month);
-    $('#budgetHint').textContent = 'Pay periods: 15th & 30th';
-    const ps=periodsActive();
-    let html='', totIncome=0, totPaid=0, totPlanned=0;
-    ps.forEach(per=>{
-      const exps=data.expenses.filter(e=>e.month===month && e.period===per);
-      const incs=data.incomes.filter(i=>i.month===month && i.period===per);
-      const income=incs.reduce((s,i)=>s+Number(i.amount||0),0);
-      const planned=exps.filter(e=>e.status==='planned'), paid=exps.filter(e=>e.status==='paid');
-      const sumPlanned=planned.reduce((s,e)=>s+Number(e.amount||0),0);
-      const sumPaid=paid.reduce((s,e)=>s+Number(e.amount||0),0);
-      const remaining=income-sumPaid-sumPlanned;
-      totIncome+=income; totPaid+=sumPaid; totPlanned+=sumPlanned;
-
-      let incRows = incs.map(i=>{
-        return `<div class="exp"><span class="nm">${esc(i.label||'Income')}</span>
-          <span class="amt" style="color:var(--good)">${money(i.amount)}</span>
-          <button class="icon-btn" onclick="App.editIncomeForm('${i.id}')">✏️</button><button class="icon-btn del" onclick="App.delIncomeLine('${i.id}')">✕</button></div>`;
-      }).join('');
-      if(!incs.length) incRows = `<p class="muted" style="font-size:13px;padding:4px 2px">No income yet for this period.</p>`;
-
-      html+=`<div class="group-title" style="font-size:15px;color:var(--ink);margin-top:20px">
-          ${per==='mid'?'15th · Mid-month':'30th · End-month'} <span class="count">${money(income)} in</span></div>
-        <div class="card">
-          <div class="row" style="margin-bottom:6px"><span class="muted" style="font-size:13px">Income · <b style="color:var(--ink)">${money(income)}</b></span><div class="spacer"></div>
-            <button class="btn ghost tiny" onclick="App.incomeAddForm('${per}')">+ Add income</button></div>
-          ${incRows}
-        </div>
-        ${groupBlock('Planned', planned, 'planned')}
-        ${groupBlock('Paid', paid, 'paid')}
-        <div class="summary" style="margin-top:10px"><div class="stat big ${remaining<0?'bad':'good'}">
-          <div class="k">Left this period</div><div class="v">${money(remaining)}</div></div></div>`;
-    });
-    const allRemaining=totIncome-totPaid-totPlanned;
-    const savings=Math.max(0, allRemaining*(S.savingsPct/100));
-    html = `<div class="summary">
-        <div class="stat ${allRemaining<0?'bad':'good'}"><div class="k">Remaining this month</div><div class="v">${money(allRemaining)}</div></div>
-        <div class="stat good"><div class="k">Suggested savings (${S.savingsPct}%)</div><div class="v">${money(savings)}</div></div>
-        <div class="stat"><div class="k">Income</div><div class="v">${money(totIncome)}</div></div>
-        <div class="stat"><div class="k">Paid + planned</div><div class="v">${money(totPaid+totPlanned)}</div></div>
-      </div>` + html + recurringEntryCard();
-    $('#budgetBody').innerHTML=html;
-  }
-
-  /* ----- Recurring charges: compact entry (bottom of Budget) + its own page ----- */
-  function recurringMonthlyTotals(){
-    let mid=0,end=0;
-    data.recurring.filter(r=>r.active!==false).forEach(r=>{ if(r.period==='mid')mid+=Number(r.amount||0); else end+=Number(r.amount||0); });
-    return {mid,end,total:mid+end};
-  }
-  function recurringEntryCard(){
-    const n=data.recurring.length;
-    const t=recurringMonthlyTotals();
-    return `<div class="group-title" style="margin-top:22px">Recurring</div>
-      <div class="card" onclick="App.openRecurring()" style="cursor:pointer;display:flex;align-items:center;gap:12px">
-        <div style="font-size:22px">🔁</div>
-        <div style="flex:1">
-          <div style="font-weight:700">Recurring charges</div>
-          <div class="muted" style="font-size:12px">${n} item${n===1?'':'s'} · ${money(t.total)}/mo (15th ${money(t.mid)} · 30th ${money(t.end)})</div>
-        </div>
-        <div style="font-size:22px;color:var(--muted)">›</div>
-      </div>`;
-  }
-  function openRecurring(){ recurringView=true; renderBudget(); window.scrollTo(0,0); }
-  function closeRecurring(){ recurringView=false; renderBudget(); window.scrollTo(0,0); }
-
-  function renderRecurringPage(){
-    $('#monthLabel').textContent=monthName(month);
-    $('#budgetHint').textContent='Recurring charges';
-    const list = data.recurring.slice().sort((a,b)=>(a.period+a.name).localeCompare(b.period+b.name));
-    const t=recurringMonthlyTotals();
-    let inner='';
-    if(!list.length){ inner=`<p class="muted" style="font-size:13px;padding:4px 2px">No recurring charges yet — add rent, bills, subscriptions…</p>`; }
-    else inner = list.map(r=>{
-      const tf = (r.start_month||r.end_month)
-        ? `${r.start_month?monthShort(r.start_month):'start'} – ${r.end_month?monthShort(r.end_month):'ongoing'}`
-        : 'Always';
-      const per = r.period==='mid'?'15th':'30th';
-      const off = r.active===false;
-      return `<div class="exp">
-        <span class="nm" style="${off?'opacity:.5;text-decoration:line-through':''}">${esc(r.name)} <span class="muted" style="font-size:11px">· ${per} · ${esc(r.category)} · ${tf}</span></span>
-        <span class="amt">${money(r.amount)}</span>
-        <button class="icon-btn" onclick="App.editRecurringForm('${r.id}')">✏️</button>
-        <button class="icon-btn del" onclick="App.askDelRecurring('${r.id}')">✕</button></div>`;
-    }).join('');
-    const html=`
-      <button class="btn line tiny" style="margin-bottom:12px" onclick="App.closeRecurring()">‹ Back to budget</button>
-      <div class="panel-head" style="margin-bottom:10px"><h2 style="font-size:20px">🔁 Recurring charges</h2></div>
-      <div class="summary" style="margin-bottom:4px">
-        <div class="stat"><div class="k">15th / month</div><div class="v">${money(t.mid)}</div></div>
-        <div class="stat"><div class="k">30th / month</div><div class="v">${money(t.end)}</div></div>
-        <div class="stat big"><div class="k">Total recurring / month</div><div class="v">${money(t.total)}</div></div>
-      </div>
-      <div class="card">
-        <div class="row" style="margin-bottom:8px"><span class="muted" style="font-size:12px">Auto-added as planned each month within their timeframe</span><div class="spacer"></div>
-          <button class="btn ghost tiny" onclick="App.recurringForm()">+ Add recurring</button></div>
-        ${inner}
-      </div>`;
-    $('#budgetBody').innerHTML=html;
-  }
-  function recurringForm(){ openRecurringSheet(null); }
-  function editRecurringForm(id){ openRecurringSheet(data.recurring.find(r=>r.id===id)); }
-  function openRecurringSheet(r){
-    const isEdit=!!r;
-    openSheet(`<h3>${isEdit?'Edit':'New'} recurring charge</h3>
-      <div class="field"><label>Name</label><input id="r_name" value="${isEdit?esc(r.name):''}" placeholder="e.g. Rent, Netflix, Internet" /></div>
-      <div class="field two"><div><label>Amount (₱)</label><input id="r_amt" type="number" inputmode="decimal" value="${isEdit?r.amount:''}" placeholder="0" /></div>
-      <div><label>Category</label><select id="r_cat">${catOptions(S.cat_budget, isEdit?r.category:S.cat_budget[0])}</select></div></div>
-      <div class="field"><label>Pay period</label><select id="r_per"><option value="mid" ${isEdit&&r.period==='mid'?'selected':''}>15th · Mid-month</option><option value="end" ${isEdit&&r.period==='end'?'selected':''}>30th · End-month</option></select></div>
-      <div class="field two"><div><label>Starts (optional)</label><input id="r_start" type="month" value="${isEdit&&r.start_month?r.start_month:''}" /></div>
-      <div><label>Ends (optional)</label><input id="r_end" type="month" value="${isEdit&&r.end_month?r.end_month:''}" /></div></div>
-      <p class="muted" style="font-size:12px">Leave both blank to recur every month with no end date.</p>
-      ${isEdit?`<div class="field"><label style="font-size:14px;color:var(--ink)"><input type="checkbox" id="r_active" style="width:auto;margin-right:6px" ${r.active!==false?'checked':''}> Active</label></div>`:''}
-      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.saveRecurring(${isEdit?`'${r.id}'`:'null'})">${isEdit?'Save':'Add'}</button></div>`);
-    setTimeout(()=>$('#r_name').focus(),100);
-  }
-  async function saveRecurring(id){
-    const name=$('#r_name').value.trim(); if(!name){toast('Name needed');return;}
-    const patch={ name, amount:parseFloat($('#r_amt').value)||0, category:$('#r_cat').value, period:$('#r_per').value,
-      start_month:$('#r_start').value||null, end_month:$('#r_end').value||null };
-    if(id){
-      patch.active = $('#r_active') ? $('#r_active').checked : true;
-      await upd('recurring_expenses', id, patch, data.recurring);
-      const linked=data.expenses.find(e=>e.recurring_id===id && e.month===month && e.status!=='paid');
-      if(linked) await upd('budget_expenses', linked.id, {name:patch.name, amount:patch.amount, category:patch.category, period:patch.period}, data.expenses);
-    } else {
-      patch.active=true; await ins('recurring_expenses', patch, data.recurring);
-    }
-    await autoLogRecurring();
-    closeSheet(); renderBudget();
-  }
-  async function askDelRecurring(id){
-    if(!confirm('Delete this recurring charge? Months already logged will stay.')) return;
-    await del('recurring_expenses', id, data.recurring);
-    renderBudget();
-  }
-
-  /* ----- Income lines (multiple labeled per period) ----- */
-  function incomeAddForm(per){ openIncomeSheet(per, null); }
-  function editIncomeForm(id){ const i=data.incomes.find(x=>x.id===id); openIncomeSheet(i.period, i); }
-  function openIncomeSheet(per, i){
-    const isEdit=!!i;
-    openSheet(`<h3>${isEdit?'Edit':'Add'} income — ${per==='mid'?'15th':'30th'} · ${monthName(month)}</h3>
-      <div class="field"><label>Label</label><input id="in_label" value="${isEdit?esc(i.label||''):''}" placeholder="e.g. Salary, Freelance, Bonus" /></div>
-      <div class="field"><label>Amount (₱)</label><input id="in_amt" type="number" inputmode="decimal" value="${isEdit?i.amount:''}" placeholder="0" /></div>
-      <input type="hidden" id="in_per" value="${per}" />
-      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.saveIncomeLine(${isEdit?`'${i.id}'`:'null'})">${isEdit?'Save':'Add'}</button></div>`);
-    setTimeout(()=>$('#in_label').focus(),100);
-  }
-  async function saveIncomeLine(id){
-    const label=$('#in_label').value.trim()||'Income';
-    const amt=parseFloat($('#in_amt').value)||0;
-    const per=$('#in_per').value;
-    if(id) await upd('budget_incomes', id, {label, amount:amt}, data.incomes);
-    else await ins('budget_incomes', {month, period:per, label, amount:amt, source:'manual'}, data.incomes);
-    closeSheet(); renderBudget();
-  }
-  async function delIncomeLine(id){ await del('budget_incomes', id, data.incomes); renderBudget(); }
-
-  function groupBlock(title, list, status){
-    const total=list.reduce((s,e)=>s+Number(e.amount||0),0);
-    const byCat={}; list.forEach(e=>{(byCat[e.category]=byCat[e.category]||[]).push(e);});
-    let inner='';
-    if(!list.length){ inner=`<p class="muted" style="font-size:13px;padding:6px 2px">Nothing here yet.</p>`; }
-    else{
-      inner='<div class="cols">';
-      Object.keys(byCat).sort().forEach(cat=>{
-        const csum=byCat[cat].reduce((s,e)=>s+Number(e.amount||0),0);
-        inner+=`<div class="colcard"><h4>${esc(cat)} <span class="sum">${money(csum)}</span></h4>`;
-        byCat[cat].forEach(e=>{
-          inner+=`<div class="exp"><span class="nm">${esc(e.name)}${e.is_recurring?' ↻':''}</span><span class="amt">${money(e.amount)}</span>
-            <button class="icon-btn" title="${status==='planned'?'Mark paid':'Mark planned'}" onclick="App.toggleExp('${e.id}')">${status==='planned'?'✓':'↩'}</button>
-            <button class="icon-btn del" onclick="App.delExp('${e.id}')">✕</button></div>`;
-        });
-        inner+='</div>';
-      });
-      inner+='</div>';
-    }
-    return `<div class="group-title">${title} <span class="count">${money(total)}</span></div><div class="card">${inner}</div>`;
-  }
-  async function toggleExp(id){ const e=data.expenses.find(x=>x.id===id); const ns=e.status==='planned'?'paid':'planned';
-    await upd('budget_expenses',id,{status:ns, paid_date: ns==='paid'?todayStr():null},data.expenses); renderBudget(); }
-  async function delExp(id){ await del('budget_expenses',id,data.expenses); renderBudget(); }
-  async function delInc(id){ await del('budget_incomes',id,data.incomes); renderBudget(); }
-
-  function expenseForm(){
-    const p = period==='both'?'mid':period;
-    openSheet(`<h3>Add expense — ${monthName(month)}</h3>
-      <div class="field"><label>Name</label><input id="f_name" placeholder="e.g. Electricity" /></div>
-      <div class="field two"><div><label>Amount</label><input id="f_amt" type="number" inputmode="decimal" placeholder="0" /></div>
-      <div><label>Category</label><select id="f_cat">${catOptions(S.cat_budget,S.cat_budget[0])}</select></div></div>
-      <div class="field two"><div><label>Pay period</label><select id="f_per"><option value="mid" ${p==='mid'?'selected':''}>Mid-month</option><option value="end" ${p==='end'?'selected':''}>End-month</option></select></div>
-      <div><label>Status</label><select id="f_st"><option value="planned">Planned</option><option value="paid">Paid</option></select></div></div>
-      <div class="field"><label><input type="checkbox" id="f_rec" style="width:auto;margin-right:6px"> Make this a recurring expense (auto-added every month)</label></div>
-      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.addExp()">Add</button></div>`);
-    setTimeout(()=>$('#f_name').focus(),100);
-  }
-  async function addExp(){
-    const name=$('#f_name').value.trim(); const amt=parseFloat($('#f_amt').value)||0;
-    if(!name){toast('Name needed');return;}
-    const per=$('#f_per').value, cat=$('#f_cat').value, st=$('#f_st').value, rec=$('#f_rec').checked;
-    let recId=null;
-    if(rec){ const r=await ins('recurring_expenses',{name,category:cat,amount:amt,period:per,active:true},data.recurring); recId=r&&r.id; }
-    await ins('budget_expenses',{month,period:per,category:cat,name,amount:amt,status:st,is_recurring:rec,recurring_id:recId,paid_date:st==='paid'?todayStr():null},data.expenses);
-    closeSheet(); renderBudget();
-  }
-  function incomeForm(){
-    const ps=periodsActive(); const cur={};
-    data.incomes.filter(i=>i.month===month).forEach(i=>cur[i.period]=i);
-    openSheet(`<h3>Income — ${monthName(month)}</h3>
-      <div class="field two"><div><label>Mid-month (₱)</label><input id="i_mid" type="number" inputmode="decimal" value="${cur.mid?cur.mid.amount:''}" placeholder="0" /></div>
-      <div><label>End-month (₱)</label><input id="i_end" type="number" inputmode="decimal" value="${cur.end?cur.end.amount:''}" placeholder="0" /></div></div>
-      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.saveIncome()">Save</button></div>`);
-  }
-  async function saveIncome(){
-    for(const per of ['mid','end']){
-      const v=parseFloat($('#i_'+per).value); if(isNaN(v))continue;
-      const ex=data.incomes.find(i=>i.month===month&&i.period===per);
-      if(ex) await upd('budget_incomes',ex.id,{amount:v},data.incomes);
-      else await ins('budget_incomes',{month,period:per,amount:v,label:''},data.incomes);
-    }
-    closeSheet(); renderBudget();
-  }
-
-  /* ----- Notes (brain dump) ----- */
-  function renderNotes(){
-    const wrap=$('#notesBody');
-    if(!data.notes.length){ wrap.innerHTML=emptyState('Brain is clear ✨','Tap + to dump anything you need to remember'); return; }
-    const sorted=data.notes.slice().sort((a,b)=>{
-      const pin=(b.pinned?1:0)-(a.pinned?1:0); if(pin) return pin;
-      return (b.created_at||'').localeCompare(a.created_at||'');
-    });
-    let html='';
-    sorted.forEach(n=>{
-      const datePill = n.date?`<span class="pill" style="margin-left:6px">🗓️ ${new Date(n.date+'T00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'})}</span>`:'';
-      html+=`<div class="card" style="margin-bottom:10px">
-        <div class="row"><b style="font-size:15px">${n.pinned?'📌 ':''}${esc(n.title||'Note')}</b>${datePill}<div class="spacer"></div>
-          <button class="icon-btn" onclick="App.editNoteForm('${n.id}')">✏️</button>
-          <button class="icon-btn del" onclick="App.delNote('${n.id}')">✕</button></div>
-        ${n.body?`<div class="muted" style="font-size:14px;margin-top:6px;white-space:pre-wrap">${esc(n.body)}</div>`:''}</div>`;
-    });
-    wrap.innerHTML=html;
-  }
-  function noteForm(dateStr){ openNoteSheet(null, dateStr); }
-  function editNoteForm(id){ openNoteSheet(data.notes.find(n=>n.id===id)); }
-  function openNoteSheet(n, presetDate){
-    const isEdit=!!n;
-    openSheet(`<h3>${isEdit?'Edit':'New'} note</h3>
-      <div class="field"><label>Title</label><input id="n_title" value="${isEdit?esc(n.title||''):''}" placeholder="e.g. Renew Vios registration" /></div>
-      <div class="field"><label>Details</label><textarea id="n_body" placeholder="Brain dump…">${isEdit?esc(n.body||''):''}</textarea></div>
-      <div class="field two"><div><label>Date (optional · shows on calendar)</label><input id="n_date" type="date" value="${isEdit?(n.date||''):(presetDate||'')}" /></div>
-      <div style="display:flex;align-items:flex-end"><label style="font-size:14px;color:var(--ink);margin-bottom:11px"><input type="checkbox" id="n_pin" style="width:auto;margin-right:6px" ${isEdit&&n.pinned?'checked':''}> Pin to top</label></div></div>
-      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.saveNote(${isEdit?`'${n.id}'`:'null'})">${isEdit?'Save':'Add'}</button></div>`);
-    setTimeout(()=>$('#n_title').focus(),100);
-  }
-  async function saveNote(id){
-    const title=$('#n_title').value.trim(), body=$('#n_body').value.trim();
-    if(!title&&!body){toast('Write something first');return;}
-    const patch={ title, body, date:$('#n_date').value||null, pinned:$('#n_pin').checked };
-    if(id) await upd('notes', id, patch, data.notes);
-    else await ins('notes', patch, data.notes);
-    closeSheet(); render(tab);
-  }
-  async function delNote(id){ if(!confirm('Delete this note?'))return; await del('notes', id, data.notes); render(tab); }
-
-  /* ----- Calendar (payments + notes) ----- */
-  let calMonth = new Date().toISOString().slice(0,7);
-  let calSel = todayStr();
-  function calShift(d){ const dt=new Date(calMonth+'-01'); dt.setMonth(dt.getMonth()+d); calMonth=dt.toISOString().slice(0,7); renderCalendar(); }
-  function calPick(ds){ calSel=ds; renderCalendar(); }
-  function calMarks(){
-    const marks={};
-    data.periods.filter(p=>p.status!=='paid' && p.due_date && p.due_date.startsWith(calMonth)).forEach(p=>{
-      const loan=data.loans.find(l=>l.id===p.loan_id);
-      (marks[p.due_date]=marks[p.due_date]||{pay:[],note:[]}).pay.push({name:loan?loan.name:'Payment', amount:(p.planned_payment||p.due_amount)});
-    });
-    data.notes.filter(n=>n.date && n.date.startsWith(calMonth)).forEach(n=>{
-      (marks[n.date]=marks[n.date]||{pay:[],note:[]}).note.push(n);
-    });
-    return marks;
-  }
-  function renderCalendar(){
-    $('#calLabel').textContent = monthName(calMonth);
-    const [y,m]=calMonth.split('-').map(Number);
-    const startDow=new Date(y,m-1,1).getDay();
-    const days=new Date(y,m,0).getDate();
-    const marks=calMarks();
-    const dows=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    let html='<div class="cal">'+dows.map(d=>`<div class="dow">${d}</div>`).join('');
-    for(let i=0;i<startDow;i++) html+='<div class="day out"></div>';
-    for(let d=1;d<=days;d++){
-      const ds=`${calMonth}-${String(d).padStart(2,'0')}`;
-      const mk=marks[ds];
-      let dots=''; if(mk){ if(mk.pay.length)dots+='<span class="dot pay"></span>'; if(mk.note.length)dots+='<span class="dot note"></span>'; }
-      html+=`<div class="day ${ds===todayStr()?'today':''} ${ds===calSel?'sel':''}" onclick="App.calPick('${ds}')">${d}<div class="dots">${dots}</div></div>`;
-    }
-    html+='</div>';
-    html+=`<div class="row" style="gap:16px;margin-top:10px;font-size:12px;justify-content:center">
-      <span><span class="dot pay" style="display:inline-block;vertical-align:middle;margin-right:5px"></span>Payment due</span>
-      <span><span class="dot note" style="display:inline-block;vertical-align:middle;margin-right:5px"></span>Note</span></div>`;
-    $('#calBody').innerHTML=html;
-    renderCalDay(marks);
-  }
-  function renderCalDay(marks){
-    if(!calSel){ $('#calDay').innerHTML=''; return; }
-    const mk=marks?marks[calSel]:calMarks()[calSel];
-    const pays=(mk&&mk.pay)||[], notes=(mk&&mk.note)||[];
-    let html=`<div class="group-title" style="margin-top:18px">${new Date(calSel+'T00:00').toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}</div><div class="card">`;
-    if(!pays.length && !notes.length) html+=`<p class="muted" style="font-size:13px">Nothing scheduled. Tap + to add a note for this day.</p>`;
-    pays.forEach(p=>{ html+=`<div class="item"><div class="body"><div class="title">💳 ${esc(p.name)}</div><div class="meta">Payment due · ${money(p.amount)}</div></div><button class="btn ghost tiny" onclick="App.go('loans')">Open</button></div>`; });
-    notes.forEach(n=>{ html+=`<div class="item"><div class="body"><div class="title">📝 ${esc(n.title||'Note')}</div>${n.body?`<div class="meta">${esc(n.body).slice(0,90)}</div>`:''}</div><button class="icon-btn" onclick="App.editNoteForm('${n.id}')">✏️</button></div>`; });
-    html+='</div>';
-    $('#calDay').innerHTML=html;
-  }
-
-  /* ----- Loans (Dynamic Revolving Planning Engine) ----- */
-  const PERIOD_LABEL = p => p==='mid' ? '15th Pay Period' : '30th Pay Period';
-  const monthShort = ym => { const [y,m]=ym.split('-'); return new Date(y,m-1,1).toLocaleString(undefined,{month:'short',year:'2-digit'}); };
-  const fmtDay = d => d ? new Date(d+'T00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'}) : '—';
-  function nextPeriod(m,p){ if(p==='mid')return{month:m,period:'end'}; const d=new Date(m+'-01'); d.setMonth(d.getMonth()+1); return{month:d.toISOString().slice(0,7),period:'mid'}; }
-  function periodDueDate(m,p){ const [y,mm]=m.split('-').map(Number); if(p==='mid')return m+'-15'; const last=new Date(y,mm,0).getDate(); return m+'-'+String(Math.min(30,last)).padStart(2,'0'); }
-  function sortPeriods(a,b){ const k=x=>x.month+(x.period==='mid'?'1':'2'); return k(a)<k(b)?-1:k(a)>k(b)?1:0; }
-
-  // Single source of truth: derive every window's balance from the fixed base (loan.balance),
-  // carrying any overpayment forward as a negative (credit) into the next window.
-  function computeWaterfall(loan){
-    const rows = data.periods.filter(p=>p.loan_id===loan.id).sort(sortPeriods);
-    let running = Number(loan.balance||0);            // fixed base / arrears = starting point
-    const calc = rows.map(p=>{
-      const accrual  = p.period==='end' ? Number(loan.installment||0) : 0;   // amortization only on the 30th
-      const startBal = running;
-      const totalDue = startBal + accrual;
-      const payment  = p.status==='paid' ? Number(p.paid_amount||0) : Number(p.planned_payment||0);
-      const after    = totalDue - payment;             // NO clamp: negative = credit rolled forward
-      running = after;
-      return { p, accrual, startBal, totalDue, payment, after };
-    });
-    return { calc, finalBalance: running };
-  }
-
-  function renderLoans(){
-    const wrap = $('#loanBody');
-    if(!data.loans.length){ wrap.innerHTML=emptyState('No loans yet','Add a balance you are paying down. Each pay period it stays due until cleared, and whatever is left rolls into the next period.'); return; }
+    $('#monthLabel').textContent = monthName(month);
+    $(`#periodSeg button[data-p="mid"]`).classList.toggle('on',period==='mid');
+    $(`#periodSeg button[data-p="end"]`).classList.toggle('on',period==='end');
     
-    // PAGE A: DASHBOARD VIEW
-    if (!activeLoanId) {
-      let html = `<div style="display:grid; grid-template-columns:1fr; gap:14px; margin-top:10px;">`;
-      data.loans.forEach(loan => {
-        const rows = data.periods.filter(p=>p.loan_id===loan.id).sort(sortPeriods);
-        const activePlanCount = rows.filter(p => p.status !== 'paid' && Number(p.planned_payment) > 0).length;
-        const finalBal = computeWaterfall(loan).finalBalance;
-        const remTxt = finalBal > 0 ? 'Remaining: '+money(finalBal) : finalBal < 0 ? 'Credit ahead: '+money(-finalBal) : 'Cleared 🎉';
-        const remCls = finalBal > 0 ? 'warn' : 'good';
-        html += `<div class="card" style="border-left: 6px solid var(--accent); padding:16px; background:var(--card)">
-          <div class="row">
-            <h3 style="font-size:18px; color:var(--ink)">${esc(loan.name)}</h3>
-            <div class="spacer"></div>
-            <span class="pill ${remCls}" style="font-size:13px; padding:4px 10px;">${remTxt}</span>
-          </div>
-          <p class="muted" style="font-size:13px; margin:6px 0 14px 0;">
-            Installment: <b>${money(loan.installment)}/mo</b> ${loan.notes ? `· ${esc(loan.notes)}` : ''}
-            ${activePlanCount > 0 ? `<br><span style="color:var(--accent)">➔ ${activePlanCount} active simulations</span>` : ''}
-          </p>
-          <div class="row" style="gap:10px;">
-            <button class="btn tiny" style="padding:8px 14px; border-radius:10px;" onclick="App.openLoanLedger('${loan.id}')">🔎 Open Planning Ledger</button>
-            <button class="btn ghost tiny" onclick="App.editLoanSettingsForm('${loan.id}')">⚙︎ Baseline</button>
-            <button class="btn line tiny" style="color:var(--bad); border:none;" onclick="App.delLoan('${loan.id}')">✕ Wipe</button>
-          </div>
+    if(recurringView){ renderRecurringList(); return; }
+    
+    const incs = data.incomes.filter(x=>x.month===month && x.period===period);
+    const exps = data.expenses.filter(x=>x.month===month && x.period===period);
+    
+    const totalInc = incs.reduce((s,x)=>s+Number(x.amount||0),0);
+    const totalExpPlanned = exps.reduce((s,x)=>s+Number(x.amount||0),0);
+    const totalExpActual = exps.filter(x=>x.status==='paid').reduce((s,x)=>s+Number(x.amount||0),0);
+    
+    const savingsAmt = totalInc * (Number(S.savingsPct||0)/100);
+    const allowancePlanned = totalInc - savingsAmt - totalExpPlanned;
+    const allowanceActual = totalInc - savingsAmt - totalExpActual;
+
+    $('#budgetHint').innerHTML = `<button class="btn ghost tiny" onclick="App.recurringForm()">⚙ Templates</button>`;
+    
+    let html = `
+      <div class="summary">
+        <div class="stat big"><div class="k">Incomes Total</div><div class="v good">${money(totalInc)}</div></div>
+        <div class="stat"><div class="k">Savings Target (${S.savingsPct}%)</div><div class="v">${money(savingsAmt)}</div></div>
+        <div class="stat"><div class="k">Spent (Actual)</div><div class="v bad">${money(totalExpActual)}</div></div>
+        <div class="stat ${allowancePlanned<0?'bad':'good'}"><div class="k">Planned Safe Allowance</div><div class="v">${money(allowancePlanned)}</div></div>
+        <div class="stat ${allowanceActual<0?'bad':'good'}"><div class="k">Current Safe Allowance</div><div class="v">${money(allowanceActual)}</div></div>
+      </div>`;
+
+    html += `<div class="group-title">Incomes / Salary lines <button class="btn ghost tiny" style="margin-left:auto" onclick="App.incomeAddForm()">+ Add</button></div>
+      <div class="card">`;
+    if(!incs.length) html += `<div class="empty">No income logged for this period</div>`;
+    else incs.forEach(i=>{
+      html += `<div class="item">
+        <div class="body"><div class="title">${esc(i.name)}</div></div>
+        <div class="amt" style="margin-right:12px;font-weight:700">${money(i.amount)}</div>
+        <div class="acts">
+          <button class="icon-btn" onclick="App.editIncomeForm('${i.id}')">✎</button>
+          <button class="icon-btn del" onclick="App.delInc('${i.id}')">✕</button>
+        </div>
+      </div>`;
+    });
+    html += `</div>`;
+
+    const byCat = {}; S.cat_budget.forEach(c=>byCat[c]=[]);
+    exps.forEach(e=>{ (byCat[e.category] = byCat[e.category] || []).push(e); });
+
+    html += `<div class="group-title">Budgeted Expenses</div><div class="cols">`;
+    Object.keys(byCat).forEach(cat=>{
+      const list = byCat[cat];
+      const sum = list.reduce((s,x)=>s+Number(x.amount||0),0);
+      html += `<div class="colcard">
+        <h4><span>${esc(cat)}</span><span class="sum">${money(sum)}</span></h4>`;
+      if(!list.length) html += `<div class="muted" style="font-size:12px;padding:6px 0">Empty</div>`;
+      else list.forEach(e=>{
+        html += `<div class="exp">
+          <button class="check tiny ${e.status==='paid'?'on':''}" style="width:16px;height:16px;font-size:10px;border-radius:5px" onclick="App.toggleExp('${e.id}')">${e.status==='paid'?'✓':''}</button>
+          <span class="nm" style="${e.status==='paid'?'text-decoration:line-through;opacity:0.6':''}" onclick="App.expenseForm('${e.id}')">${esc(e.name)}</span>
+          <span class="amt">${money(e.amount)}</span>
         </div>`;
       });
       html += `</div>`;
-      wrap.innerHTML = html;
-      return;
-    }
+    });
+    html += `</div>`;
+    
+    $('#budgetBody').innerHTML = html;
+  }
 
-    // PAGE B: LEDGER DETAILED WORKSPACE
-    const loan = data.loans.find(l => l.id === activeLoanId);
-    if(!loan) { activeLoanId = null; renderLoans(); return; }
+  function setPeriod(p){ period=p; renderBudget(); }
+  function shiftMonth(n){
+    const [y,m]=month.split('-').map(Number); const d=new Date(y,m-1+n,1);
+    month=d.toISOString().slice(0,7); renderBudget();
+  }
 
-    const rows = data.periods.filter(p=>p.loan_id===loan.id).sort(sortPeriods);
-    const { calc } = computeWaterfall(loan);
+  function incomeAddForm(){ editIncomeForm(null); }
+  function editIncomeForm(id){
+    const i=id?data.incomes.find(x=>x.id===id):null;
+    openSheet(`
+      <h3>${i?'Edit Income Line':'Add Income Line'}</h3>
+      <div class="field"><label>Description Name</label><input id="inc_name" value="${i?esc(i.name):''}" placeholder="e.g. Base Salary" /></div>
+      <div class="field"><label>Amount</label><input id="inc_amount" type="number" step="any" value="${i?i.amount||'':''}" placeholder="0.00" /></div>
+      <div class="sheet-acts">
+        <button class="btn line" onclick="App.closeSheet()">Cancel</button>
+        <button class="btn" onclick="App.saveIncomeLine('${id||''}')">Save</button>
+      </div>`);
+  }
+  async function saveIncomeLine(id){
+    const name=$('#inc_name').value.trim(), amount=Number($('#inc_amount').value)||0;
+    if(!name){ toast('Name required'); return; }
+    const row={month, period, name, amount};
+    if(id){ await upd('budget_incomes',id,row,data.incomes); }
+    else { await ins('budget_incomes',row,data.incomes); }
+    closeSheet(); renderBudget();
+  }
+  async function delInc(id){ if(confirm('Delete entry?')){ await del('budget_incomes',id,data.incomes); renderBudget(); } }
 
-    let html = `<div style="margin-bottom:16px;">
-      <button class="btn line tiny" style="background:var(--card); font-weight:700; padding:8px 12px; margin-bottom:12px;" onclick="App.closeLoanLedger()">⬅️ Back to Loans Dashboard</button>
-    </div>
-    <div class="card" style="background:var(--accent-soft); border:1px solid var(--accent); margin-bottom: 16px;">
-      <div class="row">
-        <h3 style="font-size:20px; color:var(--ink)">${esc(loan.name)} Spreadsheet</h3>
-        <div class="spacer"></div>
-        <b style="font-size:15px; color:var(--ink)">Base Debt: ${money(loan.balance)}</b>
-      </div>
-      <div class="muted" style="font-size:12px; margin-top:4px;">
-        Default Monthly Target Accrual: <b>${money(loan.installment)}</b> ${loan.notes ? `· ${esc(loan.notes)}` : ''}
-      </div>
-    </div>`;
+  function expenseForm(id){
+    const e=id?data.expenses.find(x=>x.id===id):null;
+    openSheet(`
+      <h3>${e?'Edit Budget Expense':'Add Budget Expense'}</h3>
+      <div class="field"><label>Expense Title Name</label><input id="exp_name" value="${e?esc(e.name):''}" placeholder="e.g. Electric Bill" /></div>
+      <div class="field"><label>Category</label><select id="exp_cat">${catOptions(S.cat_budget,e?.category||S.cat_budget[0])}</select></div>
+      <div class="field"><label>Amount</label><input id="exp_amount" type="number" step="any" value="${e?e.amount||'':''}" placeholder="0.00" /></div>
+      <div class="field"><label>Due Date / Operational Date (Optional)</label><input id="exp_date" type="date" value="${e?.date||''}" /></div>
+      ${e?`<div style="margin-top:4px"><button class="btn line tiny del" onclick="App.delExp('${e.id}')">✕ Entirely Delete Expense</button></div>`:''}
+      <div class="sheet-acts">
+        <button class="btn line" onclick="App.closeSheet()">Cancel</button>
+        <button class="btn" onclick="App.saveExpense('${id||''}')">Save</button>
+      </div>`);
+  }
+  async function saveExpense(id){
+    const name=$('#exp_name').value.trim(), category=$('#exp_cat').value, amount=Number($('#exp_amount').value)||0;
+    if(!name){ toast('Title name required'); return; }
+    const dateVal=$('#exp_date').value||null;
+    const row={month, period, category, name, amount, date:dateVal};
+    if(id){ await upd('budget_expenses',id,row,data.expenses); }
+    else { row.status='planned'; await ins('budget_expenses',row,data.expenses); }
+    closeSheet(); renderBudget();
+  }
+  async function toggleExp(id){
+    const e=data.expenses.find(x=>x.id===id); if(!e)return;
+    const nextStatus=e.status==='paid'?'planned':'paid';
+    await upd('budget_expenses',id,{status:nextStatus},data.expenses); renderBudget();
+  }
+  async function delExp(id){ if(confirm('Delete expense?')){ await del('budget_expenses',id,data.expenses); closeSheet(); renderBudget(); } }
 
-    calc.forEach((c, index) => {
-      const p = c.p;
-      const startingBalanceThisPeriod = c.startBal;
-      const addedInstallment = c.accrual;
-      const totalStackedDue = c.totalDue;
-      const effectivePayment = c.payment;
-      const projectedBalanceAfter = c.after;            // negative = credit carried forward
-      const isCredit = projectedBalanceAfter < 0;
-      const startIsCredit = startingBalanceThisPeriod < 0;
-      const payDefault = Math.max(0, totalStackedDue);
-
-      const overdue = p.status !== 'paid' && p.due_date && p.due_date < todayStr();
-      const cls = p.status === 'paid' ? 'good' : effectivePayment > 0 ? 'warn' : 'gray';
-      const lbl = p.status === 'paid' ? 'Paid' : effectivePayment > 0 ? 'Simulated Plan' : 'Unplanned';
-
-      html+=`<div style="border:1px solid var(--line); border-radius:12px; padding:14px; margin-top:12px; background:var(--card)">
-        <div class="row">
-          <b style="font-size:14px">${monthShort(p.month)} · ${PERIOD_LABEL(p.period)}</b>
-          <span class="pill ${cls}" style="margin-left:8px">${lbl}</span>
-          <div class="spacer"></div>
-          <span class="muted" style="font-size:12px">Due Target: ${fmtDay(p.due_date)}</span>
+  /* ----- Recurring ----- */
+  function recurringForm(){ recurringView=true; renderBudget(); }
+  function renderRecurringList(){
+    $('#budgetHint').innerHTML = `<button class="btn ghost tiny" onclick="recurringView=false;App.renderBudget()">← Back to Budget</button>`;
+    let html = `<div class="group-title">Recurring System Templates <button class="btn ghost tiny" style="margin-left:auto" onclick="App.editRecurringForm(null)">+ Template</button></div>
+      <div class="card">`;
+    if(!data.recurring.length) html += `<div class="empty">No templates created. Generated automated expenses every cycle.</div>`;
+    else data.recurring.forEach(r=>{
+      html += `<div class="item">
+        <div class="body">
+          <div class="title">${esc(r.name)} <span class="pill gray tiny">${r.period==='mid'?'15th':'30th'}</span></div>
+          <div class="meta">${esc(r.category)} · ${money(r.amount)} ${r.active===false?'(Paused)':''}</div>
         </div>
-        
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px 24px; margin-top:12px; font-size:13px; border-top:1px dashed var(--line); padding-top:12px;">
-          <div class="row"><span class="muted">Starting Balance:</span><div class="spacer"></div><span style="color:${startIsCredit?'var(--good)':'inherit'}">${startIsCredit?('Credit '+money(-startingBalanceThisPeriod)):money(startingBalanceThisPeriod)}</span></div>
-          ${addedInstallment > 0
-            ? `<div class="row"><span class="muted">Amortization (30th):</span><div class="spacer"></div><span style="color:var(--warn)">+ ${money(addedInstallment)}</span></div>`
-            : `<div class="row"><span class="muted">Amortization:</span><div class="spacer"></div><span class="muted" style="font-size:12px">— 30th only</span></div>`}
-          <div class="row" style="grid-column: 1 / -1; background:var(--bg); padding:6px 10px; border-radius:8px; border:1px solid var(--line)">
-            <span class="muted"><b>Total Due This Window:</b></span><div class="spacer"></div><b>${money(Math.max(0, totalStackedDue))}</b>
-          </div>
-          <div class="row"><span class="muted">Your Plan Allocation:</span><div class="spacer"></div><b style="color:var(--accent)">${money(p.planned_payment)}</b></div>
-          <div class="row"><span class="muted">Actual Paid:</span><div class="spacer"></div><b style="color:var(--good)">${money(p.paid_amount)}</b></div>
-        </div>
-
-        <div class="row" style="margin-top:14px; background:var(--bg); padding:8px 12px; border-radius:8px; border:1px solid var(--line)">
-          <span class="muted"><b>${isCredit ? 'Credit Carried Forward:' : 'Projected Balance After:'}</b></span>
-          <div class="spacer"></div>
-          <b style="font-size:15px; color:${isCredit ? 'var(--good)' : projectedBalanceAfter > 0 ? 'var(--warn)' : 'var(--good)'}">${isCredit ? money(-projectedBalanceAfter) : money(projectedBalanceAfter)}</b>
-        </div>
-        ${isCredit ? `<div class="muted" style="font-size:12px; margin-top:6px; color:var(--good)">↪ Overpayment of ${money(-projectedBalanceAfter)} rolls into the next pay window.</div>` : ''}
-
-        <div class="row" style="gap:6px; margin-top:12px; flex-wrap:wrap">
-          ${p.status !== 'paid'
-            ? `<button class="btn ghost tiny" onclick="App.planForm('${p.id}')">✏️ Set/Edit Plan</button>
-               <button class="btn tiny" onclick="App.payForm('${p.id}', ${payDefault})">✅ Log Payment</button>`
-            : `<button class="btn line tiny" onclick="App.unpayPeriod('${p.id}')">↩️ Undo Payment</button>`}
-          <button class="btn line tiny" onclick="App.remindLoan('${p.id}')">🔔 Remind</button>
-          ${index === calc.length - 1 ? `<button class="btn line tiny" onclick="App.extendNextPeriod('${loan.id}', '${p.month}', '${p.period}')">➕ Map Next Period</button>` : ''}
-          <button class="btn line tiny" style="color:var(--bad)" onclick="App.delPeriod('${p.id}')">✕ Remove Window</button>
+        <div class="acts">
+          <button class="icon-btn" onclick="App.editRecurringForm('${r.id}')">✎</button>
         </div>
       </div>`;
     });
-    wrap.innerHTML = html;
-  }
-
-  /* ----- Router Toggles ----- */
-  function openLoanLedger(id) { activeLoanId = id; renderLoans(); window.scrollTo(0,0); }
-  function closeLoanLedger() { activeLoanId = null; renderLoans(); window.scrollTo(0,0); }
-
-  async function syncLoanToBudget(p, loan){
-    const amount = p.status==='paid' ? (Number(p.paid_amount)||Number(p.planned_payment)||0) : (Number(p.planned_payment)||0);
-    const existing = data.expenses.find(e=>e.source==='loan'&&e.source_id===p.id);
-    if(amount<=0){ if(existing) await del('budget_expenses',existing.id,data.expenses); return; }
-    const patch={ month:p.month, period:p.period, category:'Loans', name:loan.name, amount,
-      status:p.status==='paid'?'paid':'planned', paid_date:p.status==='paid'?todayStr():null,
-      source:'loan', source_id:p.id, is_recurring:false };
-    if(existing) await upd('budget_expenses',existing.id,patch,data.expenses);
-    else await ins('budget_expenses',patch,data.expenses);
-  }
-
-  function loanForm(){
-    const m=new Date().toISOString().slice(0,7);
-    openSheet(`<h3>New Loan / Vehicle Amortization</h3>
-      <div class="field"><label>Name</label><input id="f_name" placeholder="e.g. Montero / Livina Amortization" /></div>
-      <div class="field two"><div><label>Current Overdue / Base Balance</label><input id="f_bal" type="number" inputmode="decimal" placeholder="0" /></div>
-      <div><label>Default Fixed Installment / Month</label><input id="f_pay" type="number" inputmode="decimal" placeholder="0" /></div></div>
-      <div class="field two"><div><label>Start Month</label><input id="f_month" type="month" value="${m}" /></div>
-      <div><label>Start Pay Window</label><select id="f_per"><option value="mid">15th window</option><option value="end">30th window</option></select></div></div>
-      <div class="field"><label>Notes</label><input id="f_notes" placeholder="e.g. Bank financing, due every 21st" /></div>
-      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.addLoan()">Add</button></div>`);
-    setTimeout(()=>$('#f_name').focus(),100);
-  }
-
-  async function addLoan(){
-    const name=$('#f_name').value.trim(); if(!name){toast('Name needed');return;}
-    const bal=parseFloat($('#f_bal').value)||0, pay=parseFloat($('#f_pay').value)||0;
-    const m=$('#f_month').value||new Date().toISOString().slice(0,7), per=$('#f_per').value;
-    const loan=await ins('loans',{name,balance:bal,installment:pay,notes:$('#f_notes').value.trim()},data.loans);
-    if(!loan)return;
-    const lp=await ins('loan_periods',{loan_id:loan.id,month:m,period:per,due_date:periodDueDate(m,per),
-      due_amount:bal,planned_payment:0,paid_amount:0,status:'planned',balance_after:bal},data.periods);
-    if(lp) await syncLoanToBudget(lp,loan);
-    closeSheet(); renderLoans();
-  }
-
-  function planForm(id){
-    const p=data.periods.find(x=>x.id===id);
-    openSheet(`<h3>Simulate Planned Payment</h3>
-      <p class="muted" style="font-size:13px">Type what you intend to pay during this cycle. The waterfall down below will adjust calculations automatically.</p>
-      <div class="field"><label>Planned Payment Allocation (₱)</label><input id="f_plan" type="number" inputmode="decimal" value="${p.planned_payment||''}" placeholder="0" /></div>
-      <div class="field"><label>Target Payment Date</label><input id="f_date" type="date" value="${p.due_date||''}" /></div>
-      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.savePlan('${id}')">Save & Update Waterfall</button></div>`);
-  }
-
-  async function savePlan(id){
-    const p=data.periods.find(x=>x.id===id), loan=data.loans.find(l=>l.id===p.loan_id);
-    const plan=parseFloat($('#f_plan').value)||0, dd=$('#f_date').value||p.due_date;
-    await upd('loan_periods',id,{planned_payment:plan,due_date:dd},data.periods);
-    await syncLoanToBudget(data.periods.find(x=>x.id===id),loan);
-    closeSheet(); renderLoans();
-  }
-
-  function payForm(id, computedDue){
-    const p=data.periods.find(x=>x.id===id);
-    openSheet(`<h3>Record Actual Payment</h3>
-      <p class="muted" style="font-size:13px">Locking this payment will adjust the true underlying base balance of the loan asset.</p>
-      <div class="field"><label>Amount Paid (₱)</label><input id="f_paid" type="number" inputmode="decimal" value="${p.planned_payment||computedDue||''}" /></div>
-      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.confirmPay('${id}')">Lock & Mark Paid</button></div>`);
-  }
-
-  async function confirmPay(id){
-    const p=data.periods.find(x=>x.id===id), loan=data.loans.find(l=>l.id===p.loan_id);
-    const paid=parseFloat($('#f_paid').value)||0;
-
-    // Base balance stays fixed; the waterfall derives the running balance and carries any overpayment forward.
-    await upd('loan_periods',id,{paid_amount:paid,status:'paid'},data.periods);
-    await syncLoanToBudget(data.periods.find(x=>x.id===id),loan);
-
-    closeSheet(); renderLoans();
-    const fb = computeWaterfall(loan).finalBalance;
-    toast(fb > 0 ? 'Payment locked — waterfall recalculated!' : fb < 0 ? 'Paid ahead — '+money(-fb)+' credit carried forward! 🎉' : 'Loan completely cleared! 🎉');
-  }
-
-  async function unpayPeriod(id){
-    const p=data.periods.find(x=>x.id===id), loan=data.loans.find(l=>l.id===p.loan_id);
-    await upd('loan_periods',id,{paid_amount:0,status:'planned'},data.periods);
-    await syncLoanToBudget(data.periods.find(x=>x.id===id),loan);
-    renderLoans();
-  }
-
-  async function extendNextPeriod(loanId, currentMonth, currentPeriod){
-    const np = nextPeriod(currentMonth, currentPeriod);
-    const exists = data.periods.some(x=>x.loan_id===loanId && x.month===np.month && x.period===np.period);
-    if(exists){ toast('Next period already mapped out below!'); return; }
-    
-    const nlp = await ins('loan_periods',{
-      loan_id: loanId, month: np.month, period: np.period,
-      due_date: periodDueDate(np.month, np.period), due_amount: 0,
-      planned_payment: 0, paid_amount: 0, status: 'planned', balance_after: 0
-    }, data.periods);
-    
-    if(nlp) {
-      const loan = data.loans.find(l=>l.id===loanId);
-      await syncLoanToBudget(nlp, loan);
-    }
-    renderLoans();
-    toast('Next future window generated!');
-  }
-
-  function remindLoan(id){
-    const p=data.periods.find(x=>x.id===id), loan=data.loans.find(l=>l.id===p.loan_id);
-    downloadICS(loan.name+' Payment Due', p.due_date, '09:00', 'Simulated Plan Target: '+money(p.planned_payment));
-  }
- 
-  /* ----- Safe Structural Modification Methods ----- */
-  function editLoanSettingsForm(loanId){
-    const loan = data.loans.find(l=>l.id===loanId);
-    openSheet(`<h3>Edit Loan / Vehicle Baseline</h3>
-      <div class="field"><label>Name</label><input id="e_loan_name" value="${esc(loan.name)}" /></div>
-      <div class="field two">
-        <div><label>Current Base Balance (₱)</label><input id="e_loan_bal" type="number" inputmode="decimal" value="${loan.balance}" /></div>
-        <div><label>Fixed Monthly Installment (₱)</label><input id="e_loan_pay" type="number" inputmode="decimal" value="${loan.installment}" /></div>
-      </div>
-      <div class="field"><label>Notes</label><input id="e_loan_notes" value="${esc(loan.notes)}" /></div>
-      <div class="sheet-acts">
-        <button class="btn line" onclick="App.closeSheet()">Cancel</button>
-        <button class="btn" onclick="App.saveLoanSettings('${loanId}')">Save Changes</button>
-      </div>`);
-  }
-
-  async function saveLoanSettings(loanId){
-    const name = $('#e_loan_name').value.trim(); if(!name){toast('Name needed');return;}
-    const bal = parseFloat($('#e_loan_bal').value)||0;
-    const pay = parseFloat($('#e_loan_pay').value)||0;
-    const notes = $('#e_loan_notes').value.trim();
-
-    await upd('loans', loanId, { name, balance: bal, installment: pay, notes }, data.loans);
-    closeSheet();
-    renderLoans();
-    toast('Loan baseline modified! 🎉');
+    html += `</div>`;
+    $('#budgetBody').innerHTML = html;
   }
   
-  async function delPeriod(id){
-    const ex=data.expenses.find(e=>e.source==='loan'&&e.source_id===id);
-    if(ex) await del('budget_expenses',ex.id,data.expenses);
-    await del('loan_periods',id,data.periods); renderLoans();
+  function editRecurringForm(id){
+    const r=id?data.recurring.find(x=>x.id===id):null;
+    openSheet(`
+      <h3>${r?'Edit Recurring Template':'Add Recurring Template'}</h3>
+      <div class="field"><label>Template Title</label><input id="rec_name" value="${r?esc(r.name):''}" placeholder="e.g. Rent Subscription" /></div>
+      <div class="field"><label>Category</label><select id="rec_cat">${catOptions(S.cat_budget,r?.category||S.cat_budget[0])}</select></div>
+      <div class="field"><label>Amount</label><input id="rec_amount" type="number" step="any" value="${r?r.amount||'':''}" placeholder="0.00" /></div>
+      <div class="field"><label>Trigger Billing Target Cycle</label>
+        <select id="rec_period">
+          <option value="mid" ${r?.period==='mid'?'selected':''}>Mid-month (15th Cycle)</option>
+          <option value="end" ${r?.period==='end'?'selected':''}>End-month (30th Cycle)</option>
+        </select>
+      </div>
+      <div class="field two">
+        <div><label>Start Month (Optional)</label><input id="rec_start" type="month" value="${r?.start_month||''}" /></div>
+        <div><label>End Month (Optional)</label><input id="rec_end" type="month" value="${r?.end_month||''}" /></div>
+      </div>
+      <div class="field"><label><input id="rec_active" type="checkbox" ${r?.active!==false?'checked':''} /> Template Active</label></div>
+      ${r?`<div style="margin-top:4px"><button class="btn line tiny del" onclick="App.askDelRecurring('${r.id}')">✕ Delete Template</button></div>`:''}
+      <div class="sheet-acts">
+        <button class="btn line" onclick="App.closeSheet()">Cancel</button>
+        <button class="btn" onclick="App.saveRecurring('${id||''}')">Save</button>
+      </div>`);
+  }
+  async function saveRecurring(id){
+    const name=$('#rec_name').value.trim(), category=$('#rec_cat').value, amount=Number($('#rec_amount').value)||0;
+    if(!name){ toast('Title required'); return; }
+    const row={
+      name, category, amount, period:$('#rec_period').value,
+      start_month:$('#rec_start').value||null, end_month:$('#rec_end').value||null,
+      active:$('#rec_active').checked
+    };
+    if(id){ await upd('recurring_expenses',id,row,data.recurring); }
+    else { await ins('recurring_expenses',row,data.recurring); }
+    closeSheet(); renderRecurringList();
+  }
+  async function askDelRecurring(id){ if(confirm('Delete this template calculation?')){ await del('recurring_expenses',id,data.recurring); closeSheet(); renderRecurringList(); } }
+
+  /* ----- Notes ----- */
+  function renderNotes(){
+    const wrap=$('#notesBody');
+    if(!data.notes.length){ wrap.innerHTML=emptyState('No thoughts recorded','Tap + to open a blank fast clean note card pads'); return; }
+    let html=`<div class="cols" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr))">`;
+    data.notes.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).forEach(n=>{
+      html+=`<div class="card" style="display:flex;flex-direction:column;gap:8px;cursor:pointer" onclick="App.noteForm('${n.id}')">
+        <div style="display:flex;align-items:baseline;justify-content:space-between"><b style="font-size:16px">${esc(n.title||'Untitled Card')}</b><span class="muted" style="font-size:11px">${n.date?n.date.slice(5):''}</span></div>
+        <p style="margin:0;font-size:14px;white-space:pre-wrap;color:color-mix(in srgb, var(--ink) 84%, transparent)">${esc(n.content)}</p>
+      </div>`;
+    });
+    html+=`</div>`; wrap.innerHTML=html;
+  }
+  
+  function noteForm(idOrDate){
+    let n=null; let fallbackDate='';
+    if(idOrDate && idOrDate.includes('-')) fallbackDate=idOrDate;
+    else if(idOrDate) n=data.notes.find(x=>x.id===idOrDate);
+    
+    openSheet(`
+      <h3>${n?'View / Edit Note':'Write New Thought'}</h3>
+      <div class="field"><label>Title Header</label><input id="n_title" value="${n?esc(n.title):''}" placeholder="General idea heading..." /></div>
+      <div class="field"><label>Operational Association Date (Optional)</label><input id="n_date" type="date" value="${n?.date||fallbackDate||''}" /></div>
+      <div class="field"><label>Note Text Content Body</label><textarea id="n_content" placeholder="Type structural markdown text descriptions..." style="min-height:160px">${n?esc(n.content):''}</textarea></div>
+      ${n?`<div style="margin-top:4px"><button class="btn line tiny del" onclick="App.delNote('${n.id}')">✕ Delete Note</button></div>`:''}
+      <div class="sheet-acts">
+        <button class="btn line" onclick="App.closeSheet()">Cancel</button>
+        <button class="btn" onclick="App.saveNote('${n?.id||''}')">Save Note</button>
+      </div>`);
+  }
+  async function saveNote(id){
+    const content=$('#n_content').value.trim(); if(!content){ toast('Text body empty'); return; }
+    const row={title:$('#n_title').value.trim()||'Untitled Note', date:$('#n_date').value||null, content};
+    if(id){ await upd('notes',id,row,data.notes); }
+    else { await ins('notes',row,data.notes); }
+    closeSheet(); renderNotes(); if(tab==='calendar') renderCalendar();
+  }
+  async function delNote(id){ if(confirm('Delete note card entry completely?')){ await del('notes',id,data.notes); closeSheet(); renderNotes(); if(tab==='calendar') renderCalendar(); } }
+
+  /* ----- Calendar ----- */
+  function renderCalendar(){
+    $('#calLabel').textContent = monthName(calMonth);
+    const wrap=$('#calBody');
+    
+    const [year,monthIdx]=calMonth.split('-').map(Number);
+    const firstDayIndex = new Date(year, monthIdx-1, 1).getDay();
+    const totalDays = new Date(year, monthIdx, 0).getDate();
+    
+    let html=`<div class="cal">`;
+    ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(d=>html+=`<div class="dow">${d}</div>`);
+    
+    for(let i=0; i<firstDayIndex; i++) html+=`<div class="day out"></div>`;
+    
+    for(let d=1; d<=totalDays; d++){
+      const dayStr = `${calMonth}-${String(d).padStart(2,'0')}`;
+      const isToday = dayStr === todayStr();
+      const isSel = dayStr === calSel;
+      
+      const hasExp = data.expenses.some(x=>x.date === dayStr);
+      const hasNote = data.notes.some(x=>x.date === dayStr);
+      
+      html+=`<div class="day ${isToday?'today':''} ${isSel?'sel':''}" onclick="App.calPick('${dayStr}')">
+        <span>${d}</span>
+        <div class="dots">
+          ${hasExp?`<div class="dot pay"></div>`:''}
+          ${hasNote?`<div class="dot note"></div>`:''}
+        </div>
+      </div>`;
+    }
+    html+=`</div>`; wrap.innerHTML=html;
+    renderCalDayAgenda();
+  }
+  
+  function calShift(n){
+    const [y,m]=calMonth.split('-').map(Number); const d=new Date(y,m-1+n,1);
+    calMonth=d.toISOString().slice(0,7); renderCalendar();
+  }
+  function calPick(dStr){ calSel=dStr; renderCalendar(); }
+  
+  function renderCalDayAgenda(){
+    const box=$('#calDay'); if(!calSel){ box.innerHTML=`<p class="muted宣 text-align:center;font-size:13px">Tap a tracking operational calendar block grid above to construct view points</p>`; return; }
+    const dayExps = data.expenses.filter(x=>x.date === calSel);
+    const dayNotes = data.notes.filter(x=>x.date === calSel);
+    
+    let html=`<div class="panel-head" style="margin-top:4px"><h3>Agenda: ${calSel}</h3><button class="btn ghost tiny" onclick="App.noteForm(calSel)">+ Add Note</button></div>`;
+    if(!dayExps.length && !dayNotes.length){ html+=`<div class="card empty">No expenses or markdown logs stamped scheduled today</div>`; box.innerHTML=html; return; }
+    
+    if(dayExps.length){
+      html+=`<div class="group-title">Payments / Expenses</div><div class="card">`;
+      dayExps.forEach(e=>{
+        html+=`<div class="item">
+          <button class="check tiny ${e.status==='paid'?'on':''}" style="width:16px;height:16px;border-radius:4px" onclick="App.toggleExp('${e.id}')">${e.status==='paid'?'✓':''}</button>
+          <div class="body"><div class="title">${esc(e.name)} <span class="pill gray tiny">${esc(e.category)}</span></div></div>
+          <div class="amt" style="font-weight:700;margin-right:8px">${money(e.amount)}</div>
+        </div>`;
+      });
+      html+=`</div>`;
+    }
+    if(dayNotes.length){
+      html+=`<div class="group-title">Day Associated Notes</div>`;
+      dayNotes.forEach(n=>{
+        html+=`<div class="card" style="margin-top:6px;cursor:pointer" onclick="App.noteForm('${n.id}')">
+          <b>${esc(n.title)}</b><p style="margin:4px 0 0;font-size:13px;white-space:pre-wrap">${esc(n.content)}</p>
+        </div>`;
+      });
+    }
+    box.innerHTML=html;
   }
 
-  async function delLoan(id){
-    if(!confirm('Are you absolutely sure you want to completely delete this loan asset and its calculation windows?')) return;
-    $('#syncState').textContent='Deleting…';
-    try {
-      data.expenses = data.expenses.filter(e => !(e.source === 'loan' && data.periods.filter(p=>p.loan_id===id).map(x=>x.id).includes(e.source_id)));
-      await sb.from('loan_periods').delete().eq('loan_id', id);
-      await sb.from('loans').delete().eq('id', id);
-      data.periods = data.periods.filter(p => p.loan_id !== id);
-      data.loans = data.loans.filter(l => l.id !== id);
-      $('#syncState').textContent='Synced ✓';
-      renderLoans();
-      toast('Loan wiped successfully!');
-    } catch (err) {
-      console.error(err);
-      toast('Delete failed — check connection');
-    }
+  /* ----- Loans / Long-term payments ----- */
+  function renderLoans(){
+    const wrap=$('#loanBody');
+    if(activeLoanId) { renderLoanDetails(activeLoanId); return; }
+    if(!data.loans.length){ wrap.innerHTML=emptyState('No tracking amortization entries active','Tap + bottom actions to formulate structured debts timelines matrix tracking metrics'); return; }
+    
+    let html=``;
+    data.loans.forEach(l=>{
+      const lP = data.payments.filter(p=>p.loan_id===l.id);
+      const totalPaid = lP.reduce((s,p)=>s+Number(p.amount||0),0);
+      const rem = Number(l.total_amount||0) - totalPaid;
+      const pct = Math.min(100, Math.round((totalPaid / (l.total_amount||1))*100));
+      
+      html+=`<div class="card" style="cursor:pointer" onclick="App.openLoan('${l.id}')">
+        <div style="display:flex;justify-content:between;align-items:baseline">
+          <b style="font-size:17px">${esc(l.name)}</b><div class="spacer"></div><span class="pill">${pct}% paid</span>
+        </div>
+        <div class="muted" style="font-size:12px;margin-top:2px">Lender Institution: ${esc(l.lender||'Direct')}</div>
+        <div style="background:var(--line);height:6px;border-radius:99px;margin:10px 0 6px;overflow:hidden">
+          <div style="background:var(--accent);height:100%;width:${pct}%"></div>
+        </div>
+        <div class="row" style="font-size:13px;margin-top:4px">
+          <div>Paid: <b>${money(totalPaid)}</b></div><div class="spacer"></div>
+          <div class="muted">Remaining: <b style="color:var(--ink)">${money(rem)}</b> / ${money(l.total_amount)}</div>
+        </div>
+      </div>`;
+    });
+    wrap.innerHTML=html;
   }
+  
+  function openLoan(id){ activeLoanId=id; renderLoans(); }
+  
+  function renderLoanDetails(id){
+    const l = data.loans.find(x=>x.id===id); if(!l) { activeLoanId=null; renderLoans(); return; }
+    const wrap=$('#loanBody');
+    
+    const lP = data.payments.filter(p=>p.loan_id===l.id);
+    const totalPaid = lP.reduce((s,p)=>s+Number(p.amount||0),0);
+    const rem = Number(l.total_amount||0) - totalPaid;
+    
+    let html=`<div style="margin-bottom:12px"><button class="btn ghost tiny" onclick="App.openLoan(null)">← Back to Loans List</button></div>
+      <div class="card" style="position:relative">
+        <div style="position:absolute;top:12px;right:12px">
+          <button class="icon-btn tiny line" style="display:inline-flex" onclick="App.loanForm('${l.id}')">✎ Edit</button>
+        </div>
+        <h3 style="font-size:20px">${esc(l.name)}</h3>
+        <p class="muted" style="font-size:13px;margin:2px 0 10px">Lender Institution context string: <b>${esc(l.lender||'N/A')}</b></p>
+        <div class="summary" style="margin-top:0">
+          <div class="stat"><div class="k">Principal Overall</div><div class="v">${money(l.total_amount)}</div></div>
+          <div class="stat good"><div class="k">Aggregated Paid</div><div class="v">${money(totalPaid)}</div></div>
+          <div class="stat bad"><div class="k">Outstanding Remaining</div><div class="v">${money(rem)}</div></div>
+          <div class="stat"><div class="k">Amortization / Term</div><div class="v" style="font-size:15px;font-weight:700;margin-top:6px">${l.months_term||'Variable'} mos @ ${money(l.monthly_payment)}/mo</div></div>
+        </div>
+      </div>`;
+
+    html+=`<div class="group-title">Amortization Schedule Ledger / Carryover Logs <button class="btn ghost tiny" style="margin-left:auto" onclick="App.planForm()">+ Add Term Payment</button></div>
+      <div class="card" style="padding:4px">
+        <table class="pay">
+          <thead><tr><th>Period Cycle</th><th>Due Date</th><th class="num">Expected Target</th><th class="num">Amount Settled</th><th>Status Actions</th></tr></thead>
+          <tbody>`;
+    
+    const sPeriods = data.periods.filter(p=>p.loan_id===l.id).sort((a,b)=>String(a.period_name).localeCompare(String(b.period_name)));
+    if(!sPeriods.length) html+=`<tr><td colspan="5" class="empty">No tracked operational cycle splits initiated structure. Tap + button above to log one.</td></tr>`;
+    else sPeriods.forEach(p=>{
+      const matchPay = lP.find(x=>x.period_id === p.id);
+      html+=`<tr>
+        <td><b>${esc(p.period_name)}</b></td>
+        <td><span class="muted" style="font-size:12px">${p.due_date||'Unscheduled'}</span>
+          ${p.due_date?`<button style="font-size:11px;color:var(--accent);margin-left:4px" onclick="App.remindLoan('${p.id}')">⏰ ICS</button>`:''}</td>
+        <td class="num">${money(p.expected_amount || l.monthly_payment)}</td>
+        <td class="num font-weight:700">${matchPay?money(matchPay.amount):'—'}</td>
+        <td>
+          ${matchPay?`<span class="pill good">Paid</span> <button class="icon-btn del tiny" style="display:inline-grid;width:20px;height:20px;font-size:10px" onclick="App.unpayPeriod('${p.id}','${matchPay.id}')">✕</button>`:
+          `<button class="btn ghost tiny" onclick="App.payForm('${p.id}')">Settle</button>`}
+          <button class="icon-btn del tiny" style="display:inline-grid;width:20px;height:20px;font-size:10px;margin-left:4px" onclick="App.delPeriod('${p.id}')">✕</button>
+        </td>
+      </tr>`;
+    });
+    
+    html+=`</tbody></table></div>`; wrap.innerHTML=html;
+  }
+  
+  function remindLoan(pId){
+    const p = data.periods.find(x=>x.id===pId); if(!p) return;
+    const l = data.loans.find(x=>x.id===p.loan_id); if(!l) return;
+    downloadICS(`Pay Loan: ${l.name} (${p.period_name})`, p.due_date, '10:00', `Expectation requirement: ${money(p.expected_amount||l.monthly_payment)} due via provider context system.`);
+  }
+
+  function loanForm(id){
+    const l=id?data.loans.find(x=>x.id===id):null;
+    openSheet(`
+      <h3>${l?'Edit Long-term Debt Details':'Create New Amortization Log Matrix'}</h3>
+      <div class="field"><label>Loan Account Matrix Identifier Title</label><input id="lo_name" value="${l?esc(l.name):''}" placeholder="e.g. Car Amortization, Housing Loan" /></div>
+      <div class="field"><label>Lender Institution / Provider Name</label><input id="lo_lender" value="${l?esc(l.lender):''}" placeholder="e.g. BDO, Bank, Family Member" /></div>
+      <div class="field"><label>Total Principal Balance Amount</label><input id="lo_total" type="number" step="any" value="${l?l.total_amount||'':''}" placeholder="0.00" /></div>
+      <div class="field two">
+        <div><label>Monthly Recurring Charge</label><input id="lo_monthly" type="number" step="any" value="${l?l.monthly_payment||'':''}" placeholder="0.00" /></div>
+        <div><label>Months Term Span Duration</label><input id="lo_term" type="number" value="${l?l.months_term||'':''}" placeholder="e.g. 36" /></div>
+      </div>
+      ${l?`<div style="margin-top:4px"><button class="btn line tiny del" onclick="App.delLoan('${l.id}')">✕ Delete Account Matrix Log Completely</button></div>`:''}
+      <div class="sheet-acts">
+        <button class="btn line" onclick="App.closeSheet()">Cancel</button>
+        <button class="btn" onclick="App.saveLoan('${id||''}')">Save Account</button>
+      </div>`);
+  }
+  async function saveLoan(id){
+    const name=$('#lo_name').value.trim(), total_amount=Number($('#lo_total').value)||0;
+    if(!name||!total_amount){ toast('Name and total principal balance required'); return; }
+    const row={name, lender:$('#lo_lender').value.trim(), total_amount, monthly_payment:Number($('#lo_monthly').value)||0, months_term:Number($('#lo_term').value)||null};
+    if(id){ await upd('loans',id,row,data.loans); closeSheet(); renderLoans(); }
+    else { const d=await ins('loans',row,data.loans); closeSheet(); if(d) openLoan(d.id); }
+  }
+  async function delLoan(id){ if(confirm('Are you sure you want to delete this loan track and all associated amortization schedule items?')){ await del('loans',id,data.loans); activeLoanId=null; closeSheet(); renderLoans(); } }
+
+  function planForm(){
+    openSheet(`
+      <h3>Log Term Schedule Split</h3>
+      <div class="field"><label>Period Cycle Term Label</label><input id="p_name" placeholder="e.g. Month 1, Month 2, Mar 2026" /></div>
+      <div class="field"><label>Calendar Due Date</label><input id="p_due" type="date" value="${todayStr()}" /></div>
+      <div class="field"><label>Target Expected Amount (Optional)</label><input id="p_expected" type="number" step="any" placeholder="Defaults to loan monthly calculation standard" /></div>
+      <div class="sheet-acts">
+        <button class="btn line" onclick="App.closeSheet()">Cancel</button>
+        <button class="btn" onclick="App.savePlan()">Instantiate Split</button>
+      </div>`);
+  }
+  async function savePlan(){
+    const p_name=$('#p_name').value.trim(); if(!p_name){ toast('Period label description name required'); return; }
+    const row={loan_id:activeLoanId, period_name:p_name, due_date:$('#p_due').value||null, expected_amount:Number($('#p_expected').value)||null};
+    const d=await ins('loan_periods',row,data.periods); if(d) { closeSheet(); renderLoans(); }
+  }
+  async function delPeriod(id){ if(confirm('Delete schedule split row configuration row?')){ await del('loan_periods',id,data.periods); renderLoans(); } }
+
+  function payForm(pId){
+    const p = data.periods.find(x=>x.id===pId); const l = data.loans.find(x=>x.id===activeLoanId);
+    const def = p?.expected_amount || l?.monthly_payment || 0;
+    openSheet(`
+      <h3>Record Actual Outflow Settle Payment</h3>
+      <div class="field"><label>Actual Cash Flow Settled Amount</label><input id="py_amt" type="number" step="any" value="${def}" /></div>
+      <div class="field"><label>Date Paid</label><input id="py_date" type="date" value="${todayStr()}" /></div>
+      <div class="field"><label>Reference Number / Transaction Note Attachment</label><input id="py_note" placeholder="e.g. Reference, Bank Transfer ID String" /></div>
+      <div class="sheet-acts">
+        <button class="btn line" onclick="App.closeSheet()">Cancel</button>
+        <button class="btn" onclick="App.confirmPay('${pId}')">Commit Outflow Balance</button>
+      </div>`);
+  }
+  async function confirmPay(pId){
+    const amt=Number($('#py_amt').value)||0; if(!amt){ toast('Valid cash amount required'); return; }
+    const row={loan_id:activeLoanId, period_id:pId, amount:amt, date_paid:$('#py_date').value||todayStr(), notes:$('#py_note').value.trim()};
+    const d=await ins('loan_payments',row,data.payments); if(d) { closeSheet(); renderLoans(); }
+  }
+  async function unpayPeriod(pId, payId){ if(confirm('Remove cash inflow record payment item? Balance outstanding ledger rules restore.')){ await del('loan_payments',payId,data.payments); renderLoans(); } }
 
   /* ----- Settings ----- */
-  const PALETTES=[['#7c6f9c','Lavender'],['#c4717a','Rosewood'],['#5b8a72','Sage'],['#8c4a28','Terracotta'],['#4a6fa5','Slate blue'],['#b3823e','Amber'],['#6a7b8c','Stone']];
-  const FONTS=['Manrope','Inter','Nunito','Poppins','Lora','Quicksand','Work Sans','DM Sans'];
   function renderSettings(){
-    let html=`<div class="card"><h3 style="font-size:15px;margin-bottom:10px">Appearance</h3>
-      <div class="field"><label>Accent colour</label><div class="row" style="flex-wrap:wrap">
-        ${PALETTES.map(([c,n])=>`<button class="swatch ${S.accent===c?'on':''}" style="background:${c}" title="${n}" onclick="App.setOpt('accent','${c}')"></button>`).join('')}
-        <input type="color" value="${S.accent}" onchange="App.setOpt('accent',this.value)" style="width:34px;height:34px;border:none;background:none;padding:0" /></div></div>
-      <div class="field"><label>Background</label><div class="row">
-        ${['#faf7f2','#ffffff','#f3f5f7','#f7f3f9','#1c1b22'].map(c=>`<button class="swatch ${S.bg===c?'on':''}" style="background:${c}" onclick="App.setOpt('bg','${c}')"></button>`).join('')}</div></div>
-      <div class="field"><label>Font</label><select onchange="App.setOpt('font',this.value)">${FONTS.map(f=>`<option ${S.font===f?'selected':''}>${f}</option>`).join('')}</select></div>
-    </div>`;
-
-    html+=`<div class="card"><h3 style="font-size:15px;margin-bottom:10px">Budget setup</h3>
-      <div class="field two"><div><label>Currency symbol</label><input value="${esc(S.currency)}" onchange="App.setOpt('currency',this.value)" /></div>
-      <div><label>Savings target %</label><input type="number" value="${S.savingsPct}" onchange="App.setOpt('savingsPct',+this.value)" /></div></div>
-      <div class="field two"><div><label>Mid-month pay day</label><input type="number" value="${S.payMid}" onchange="App.setOpt('payMid',+this.value)" /></div>
-      <div><label>End-month pay day</label><input type="number" value="${S.payEnd}" onchange="App.setOpt('payEnd',+this.value)" /></div></div></div>`;
-
-    html+=catEditor('Shopping categories','cat_shopping');
-    html+=catEditor('Budget categories','cat_budget');
-
-    html+=`<div class="card"><h3 style="font-size:15px;margin-bottom:6px">Recurring expense templates</h3>
-      <p class="muted" style="font-size:12px">These auto-add as planned each month. Mark an expense "recurring" when adding it to create one.</p>`;
-    if(data.recurring.length){ html+='<div style="margin-top:8px">'; data.recurring.forEach(r=>{
-      html+=`<div class="exp"><span class="nm">${esc(r.name)} <span class="muted">· ${r.period==='mid'?'Mid':'End'} · ${esc(r.category)}</span></span><span class="amt">${money(r.amount)}</span>
-        <button class="icon-btn del" style="margin-left:8px" onclick="App.delRecurring('${r.id}')">✕</button></div>`;
-    }); html+='</div>'; } else html+='<p class="muted" style="font-size:13px;margin-top:6px">None yet.</p>';
-    html+='</div>';
-
+    let html=`
+      <div class="card">
+        <h3>App Preferences Configurations</h3>
+        <div class="field"><label>Currency Token Identifier</label><input id="s_curr" value="${esc(S.currency)}" /></div>
+        <div class="field"><label>Savings Allocation Target Target Metric Percentage (%)</label><input id="s_pct" type="number" value="${S.savingsPct}" /></div>
+        <div class="field"><label>Primary Visual Identity Color Accent Hex</label>
+          <div class="chips">
+            ${['#7c6f9c','#4f7ca1','#3f9d6d','#c4544f','#2c2a33'].map(c=>`<button class="swatch ${S.accent===c?'on':''}" style="background:${c}" onclick="App.savePref('accent','${c}')"></button>`).join('')}
+            <input id="s_acc_custom" type="color" value="${S.accent}" onchange="App.savePref('accent',this.value)" style="width:40px;height:34px;padding:0;border:none;cursor:pointer" />
+          </div>
+        </div>
+        <div class="field"><label>Font Framework Theme</label>
+          <select id="s_font" onchange="App.savePref('font',this.value)">
+            ${['Manrope','Inter','Plus Jakarta Sans','System-ui'].map(f=>`<option value="${f}" ${S.font===f?'selected':''}>${f}</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn" style="width:100%;justify-content:center;margin-top:8px" onclick="App.saveSettingsDataBlock()">Save Settings Data</button>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <h3>User Metadata Status</h3>
+        <p class="muted" style="font-size:13px">Logged Account User Identity: <b>${esc(authEmail)}</b></p>
+        <div class="row" style="margin-top:10px">
+          <button class="btn line" onclick="App.doLogout()">Log Out Account Access</button>
+        </div>
+      </div>`;
+    
     if(isAdmin()){
-      const subs = data.submissions.slice().sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
-      const pend = subs.filter(s=>s.status==='pending');
-      let rows='';
-      if(!subs.length) rows=`<p class="muted" style="font-size:13px">No payment submissions yet.</p>`;
-      else rows = subs.map(s=>{
-        const st=s.status, cls=st==='approved'?'good':st==='rejected'?'bad':'warn';
-        return `<div class="item">
-          ${s.screenshot?`<img src="${s.screenshot}" style="width:40px;height:40px;border-radius:8px;object-fit:cover;flex:none" onclick="window.open('${s.screenshot}')" />`:''}
-          <div class="body"><div class="title">${esc(s.email||'—')}</div>
-            <div class="meta">Ref ${esc(s.reference||'—')}${s.note?(' · '+esc(s.note)):''}</div></div>
-          ${st==='pending'
-            ? `<button class="btn tiny" onclick="App.approvePayment('${s.id}','${s.user_id}')">Approve</button><button class="btn line tiny" onclick="App.rejectPayment('${s.id}')">✕</button>`
-            : `<span class="pill ${cls}">${st}</span>`}
-        </div>`;
-      }).join('');
-      html+=`<div class="card"><h3 style="font-size:15px;margin-bottom:8px">💳 Payments <span class="muted" style="font-size:12px">· ${pend.length} pending</span></h3>${rows}</div>`;
+      html+=`<div class="group-title">Admin Operational Master Dashboard Access Controls</div>`;
+      if(!data.submissions.length) html+=`<div class="card empty">No incoming buyer requests on file</div>`;
+      else {
+        data.submissions.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).forEach(sub=>{
+          html+=`<div class="card" style="margin-top:10px">
+            <div class="row">
+              <b>${esc(sub.email)}</b>
+              <div class="spacer"></div>
+              <span class="pill ${sub.status==='approved'?'good':sub.status==='rejected'?'bad':'warn'}">${esc(sub.status)}</span>
+            </div>
+            <p class="muted" style="font-size:13px;margin:4px 0">Ref Code Code: <b>${esc(sub.reference)}</b> ${sub.note?`· Note: ${esc(sub.note)}`:''}</p>
+            ${sub.screenshot?`<img src="${esc(sub.screenshot)}" alt="Proof image" style="max-width:100%;max-height:220px;display:block;border-radius:10px;margin-top:8px" />`:''}
+            ${sub.status==='pending'?`
+              <div class="row" style="margin-top:10px;gap:8px">
+                <button class="btn tiny good" onclick="App.authApproveSub('${sub.id}','${sub.user_id || sub.email}')">✓ Approve Unlock Access</button>
+                <button class="btn tiny line bad" onclick="App.authRejectSub('${sub.id}')">✕ Reject Submission</button>
+              </div>`:''}
+          </div>`;
+        });
+      }
     }
-
-    html+=`<div class="card"><h3 style="font-size:15px;margin-bottom:8px">Add to Home Screen</h3>
-      <p class="muted" style="font-size:13px">In Safari: tap <b>Share</b> → <b>Add to Home Screen</b>. LifeHub then opens full-screen like an app.</p></div>`;
-
-    html+=`<div class="card"><h3 style="font-size:15px;margin-bottom:8px">Account</h3>
-      <p class="muted" style="font-size:13px;margin-bottom:4px">Signed in as <b style="color:var(--ink)">${esc(authEmail||'')}</b></p>
-      <p class="muted" style="font-size:11px;word-break:break-all;margin-bottom:12px">Account ID: ${esc(uid||'')}</p>
-      <button class="btn line" style="width:100%;justify-content:center" onclick="App.doLogout()">Log out</button></div>`;
     $('#settingsBody').innerHTML=html;
   }
-  function catEditor(title,key){
-    return `<div class="card"><h3 style="font-size:15px;margin-bottom:10px">${title}</h3>
-      <div class="chips" id="chips_${key}">
-        ${S[key].map((c,i)=>`<span class="chip">${esc(c)}<button onclick="App.removeCat('${key}',${i})">✕</button></span>`).join('')}
-      </div>
-      <div class="row" style="margin-top:10px"><input id="newcat_${key}" placeholder="Add category" style="flex:1;padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:var(--bg)" />
-        <button class="btn ghost tiny" onclick="App.addCat('${key}')">Add</button></div></div>`;
+  
+  async function savePref(k,v){ S[k]=v; applyTheme(); }
+  
+  async function saveSettingsDataBlock(){
+    S.currency = $('#s_curr').value.trim() || DEFAULTS.currency;
+    S.savingsPct = Number($('#s_pct').value) || 0;
+    S.font = $('#s_font').value;
+    $('#syncState').textContent='Syncing settings…';
+    const {error}=await sb.from('app_settings').update({data:S}).eq('user_id',uid);
+    if(error){ toast('Failed to save cloud preferences settings'); }
+    else { toast('App preferences globally synced ✓'); applyTheme(); renderSettings(); }
   }
-  async function setOpt(k,v){ S[k]=v; applyTheme(); await saveSettings(); if(tab==='settings')renderSettings(); }
-  async function addCat(key){ const inp=$('#newcat_'+key); const v=inp.value.trim(); if(!v)return; if(!S[key].includes(v))S[key].push(v); inp.value=''; await saveSettings(); renderSettings(); }
-  async function removeCat(key,i){ S[key].splice(i,1); await saveSettings(); renderSettings(); }
-  async function delRecurring(id){ await del('recurring_expenses',id,data.recurring); renderSettings(); }
-  async function saveSettings(){ await sb.from('app_settings').upsert({user_id:uid, data:S, updated_at:new Date().toISOString()}, {onConflict:'user_id'}); }
-
-  /* ----- Admin: approve / reject payments ----- */
-  async function approvePayment(id, userId){
-    alert('① Approve tapped\nuser: '+userId);
+  
+  async function authApproveSub(id, buyerUserIdOrEmail){
     try{
-      const { error } = await sb.from('access').upsert({ user_id:userId, paid:true, paid_at:new Date().toISOString() }, { onConflict:'user_id' }).select();
-      if(error){ alert('❌ access error: '+error.message); return; }
-      const r = await sb.from('payment_submissions').update({ status:'approved' }).eq('id',id);
-      if(r.error){ alert('❌ status error: '+r.error.message); return; }
+      let finalUid = null;
+      if (buyerUserIdOrEmail.includes('@')) {
+        const { data: userProfile, error: profileErr } = await sb.from('payment_submissions').select('user_id').eq('id',id).maybeSingle();
+        if (userProfile && userProfile.user_id) {
+          finalUid = userProfile.user_id;
+        } else {
+          toast('Could not auto-resolve User ID token context string automatically');
+          finalUid = prompt("Enter explicit user_id guid key matching account database profile setup:");
+          if(!finalUid) return;
+        }
+      } else {
+        finalUid = buyerUserIdOrEmail;
+      }
+      
+      const {error:accErr}=await sb.from('access').upsert({user_id:finalUid, paid:true},{onConflict:'user_id'});
+      if(accErr) throw accErr;
+      const {error:subErr}=await sb.from('payment_submissions').update({status:'approved'}).eq('id',id);
+      if(subErr) throw subErr;
+      
       const s=data.submissions.find(x=>x.id===id); if(s)s.status='approved';
-      renderSettings(); alert('✅ Approved & unlocked');
-    }catch(e){ alert('❌ error: '+((e&&e.message)||e)); }
+      renderSettings(); toast('User system profile access unlocked successfully');
+    }catch(e){ alert('Approval error processing logic: '+((e&&e.message)||e)); }
   }
-  async function rejectPayment(id){
+  
+  async function authRejectSub(id){
     try{
-      const r = await sb.from('payment_submissions').update({ status:'rejected' }).eq('id',id);
-      if(r.error){ alert('Reject failed: '+r.error.message); return; }
+      const {error}=await sb.from('payment_submissions').update({status:'rejected'}).eq('id',id);
+      if(error) throw error;
       const s=data.submissions.find(x=>x.id===id); if(s)s.status='rejected';
       renderSettings(); toast('Marked as rejected');
     }catch(e){ alert('Reject error: '+((e&&e.message)||e)); }
   }
 
-  function emptyState(b,p){ return `<div class="empty"><b>${b}</b>${p}</div>`; }
+  function emptyState(b,p){ return `<div class=\"empty\"><b>${b}</b>${p}</div>`; }
 
   /* ----- FAB router ----- */
-  function fab(){ if(tab==='budget'&&recurringView){ recurringForm(); return; } ({shopping:shopForm,budget:expenseForm,loans:loanForm,notes:()=>noteForm(),calendar:()=>noteForm(calSel||todayStr())}[tab]||(()=>{}))(); }
+  function fab(){ 
+    if(tab==='budget'&&recurringView){ recurringForm(); return; } 
+    ({shopping:shopForm,budget:()=>expenseForm(null),loans:loanForm,notes:()=>noteForm(),calendar:()=>noteForm(calSel||todayStr())}[tab]||(()=>{}))(); 
+  }
 
   /* ----- init ----- */
   function init(){
@@ -1425,19 +1293,18 @@ const App = (() => {
   return { init, go, fab, saveCreds, closeSheet,
     authSubmit, authToggle, doLogout,
     toggleShop, delShop, shopForm, editShopForm, saveShop, onShopImg, clearShopImg,
-    setPeriod, shiftMonth, renderBudget, incomeForm, saveIncome, delInc,
-    incomeAddForm, editIncomeForm, saveIncomeLine, delIncomeLine,
-    recurringForm, editRecurringForm, saveRecurring, askDelRecurring, openRecurring, closeRecurring,
-    expenseForm, addExp, toggleExp, delExp,
-    noteForm, editNoteForm, saveNote, delNote,
+    setPeriod, shiftMonth, renderBudget, incomeAddForm, editIncomeForm, saveIncomeLine, delInc,
+    expenseForm, saveExpense, toggleExp, delExp,
+    recurringForm, editRecurringForm, saveRecurring, askDelRecurring,
+    noteForm, saveNote, delNote,
     calShift, calPick,
-    loanForm, addLoan, delLoan, planForm, savePlan, payForm, confirmPay, unpayPeriod, delPeriod, remindLoan,
-    extendNextPeriod,
-    editLoanSettingsForm, saveLoanSettings,
-    openLoanLedger, closeLoanLedger,
-    setOpt, addCat, removeCat, delRecurring };
+    loanForm, saveLoan, delLoan, planForm, savePlan, payForm, confirmPay, unpayPeriod, delPeriod, remindLoan,
+    savePref, saveSettingsDataBlock, authApproveSub, authRejectSub, onPayProof, submitPayment, refreshAccess
+  };
 })();
-document.addEventListener('DOMContentLoaded', App.init);
+
+// Trigger runtime bootstrap compilation engine loops automatically
+App.init();
 </script>
 </body>
 </html>
