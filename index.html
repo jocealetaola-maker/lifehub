@@ -356,9 +356,9 @@ const App = (() => {
   const isAdmin = () => uid === ADMIN_UID;
   // ---- EDIT THESE with your real details (shown to buyers on the paywall) ----
   const PAY = {
-    price:       "₱30",             // display text for the one-time price
+    price:       "₱30",              // display text for the one-time price
     gcashNumber: "0951 751 6681",    // your GCash number
-    gcashName:   "John Bryan Julieza",        // your GCash account name
+    gcashName:   "John Bryan Julieza",// your GCash account name
     bank:        "",                 // optional e.g. "BPI 1234-5678-90 (Your Name)"; "" hides it
     qrUrl:       ""                  // optional: URL/path to your GCash QR image; "" hides it
   };
@@ -1392,16 +1392,22 @@ const App = (() => {
 
   /* ----- Admin: approve / reject payments ----- */
   async function approvePayment(id, userId){
-    const { error } = await sb.from('access').upsert({ user_id:userId, paid:true, paid_at:new Date().toISOString() }, { onConflict:'user_id' });
-    if(error){ console.error(error); toast('Approve failed'); return; }
-    await sb.from('payment_submissions').update({ status:'approved' }).eq('id',id);
-    const s=data.submissions.find(x=>x.id===id); if(s)s.status='approved';
-    renderSettings(); toast('Approved & unlocked ✓');
+    try{
+      const { error } = await sb.from('access').upsert({ user_id:userId, paid:true, paid_at:new Date().toISOString() }, { onConflict:'user_id' }).select();
+      if(error){ alert('Approve failed (access): '+error.message); return; }
+      const r = await sb.from('payment_submissions').update({ status:'approved' }).eq('id',id);
+      if(r.error){ alert('Approve failed (status): '+r.error.message); return; }
+      const s=data.submissions.find(x=>x.id===id); if(s)s.status='approved';
+      renderSettings(); toast('Approved & unlocked ✓');
+    }catch(e){ alert('Approve error: '+((e&&e.message)||e)); }
   }
   async function rejectPayment(id){
-    await sb.from('payment_submissions').update({ status:'rejected' }).eq('id',id);
-    const s=data.submissions.find(x=>x.id===id); if(s)s.status='rejected';
-    renderSettings(); toast('Marked as rejected');
+    try{
+      const r = await sb.from('payment_submissions').update({ status:'rejected' }).eq('id',id);
+      if(r.error){ alert('Reject failed: '+r.error.message); return; }
+      const s=data.submissions.find(x=>x.id===id); if(s)s.status='rejected';
+      renderSettings(); toast('Marked as rejected');
+    }catch(e){ alert('Reject error: '+((e&&e.message)||e)); }
   }
 
   function emptyState(b,p){ return `<div class="empty"><b>${b}</b>${p}</div>`; }
