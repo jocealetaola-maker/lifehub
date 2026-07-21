@@ -12,21 +12,26 @@
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%237c746a'/%3E%3Ctext x='50' y='66' font-size='52' text-anchor='middle' fill='white' font-family='sans-serif'%3EL%3C/text%3E%3C/svg%3E" />
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fleur+De+Leah&family=Praise&family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet">
 
 <style>
   :root{
-    --accent:#7c746a;
-    --accent-soft:#efece8;
-    --bg:#faf7f2;
+    --accent:#6b7280;
+    --accent-soft:#eceef1;
+    --bg:#f5f5f4;
     --card:#ffffff;
-    --ink:#2c2a33;
-    --muted:#8a8694;
-    --line:#ece8f0;
+    --ink:#2b2b2e;
+    --muted:#8b8b90;
+    --line:#e6e6e8;
     --good:#3f9d6d;
     --warn:#d98324;
     --bad:#c4544f;
     --radius:16px;
-    --font:'Manrope', system-ui, -apple-system, sans-serif;
+    --font:'Quicksand', system-ui, -apple-system, sans-serif;
+    --font-title:'Quicksand', system-ui, sans-serif;
+    --font-label:'Quicksand', system-ui, sans-serif;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;padding:0}
@@ -36,7 +41,7 @@
     color:var(--ink);
     font-size:15px;
     line-height:1.45;
-    padding-bottom:calc(76px + env(safe-area-inset-bottom));
+    padding-bottom:calc(30px + env(safe-area-inset-bottom));
     -webkit-font-smoothing:antialiased;
   }
   h1,h2,h3{margin:0;font-weight:700}
@@ -50,7 +55,7 @@
     backdrop-filter:blur(10px);
     padding:calc(12px + env(safe-area-inset-top)) 18px 12px;
     border-bottom:1px solid var(--line);
-    display:flex;align-items:baseline;justify-content:space-between;gap:10px;
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
   }
   header.app .brand{font-size:20px;font-weight:800;letter-spacing:-.4px}
   header.app .brand span{color:var(--accent)}
@@ -183,16 +188,34 @@
   .toast.show{opacity:1}
 
   .setup{max-width:440px;margin:40px auto;padding:0 18px}
+
+  /* calligraphy title + labels */
+  header.app .brand{font-family:var(--font-title);font-weight:600;font-size:30px;line-height:1.05}
+  .panel-head h2{font-family:var(--font-title);font-weight:600}
+  .hdr-back{font-size:30px;color:var(--accent);width:30px;height:38px;line-height:1;margin-right:2px;display:none}
+
+  /* home launcher */
+  #home{max-width:760px;margin:0 auto;padding:4px 2px}
+  .home-greet{display:flex;align-items:center;gap:11px;background:var(--accent-soft);border-radius:16px;padding:12px 14px;margin:6px 2px 18px}
+  .home-greet .face{font-size:26px;line-height:1}
+  .home-greet p{font-family:var(--font-label);font-size:17px;color:var(--accent);margin:0}
+  .home-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .htile{border-radius:26px;padding:20px 12px 15px;text-align:center;transition:transform .12s;border:none;cursor:pointer;width:100%}
+  .htile:active{transform:scale(.96)}
+  .htile svg{width:52px;height:52px;filter:drop-shadow(0 4px 5px rgba(0,0,0,.15))}
+  .htile .lb{font-family:var(--font-label);font-size:21px;margin-top:5px;display:block;line-height:1.1}
 </style>
+
 </head>
 <body>
 
 <header class="app">
+  <button id="hdrBack" class="hdr-back" onclick="App.go('home')">‹</button>
   <div>
-    <div class="brand">Life<span>Hub</span></div>
+    <div class="brand" id="hdrTitle">LifeHub</div>
     <div class="sub" id="syncState">Connecting…</div>
   </div>
-  <button class="btn ghost tiny" id="gearBtn" onclick="App.go('settings')">⚙︎ Settings</button>
+  <button class="btn ghost tiny" id="gearBtn" onclick="App.go('settings')">⚙︎</button>
 </header>
 
 <main>
@@ -214,6 +237,8 @@
   <section id="paywall" style="display:none;max-width:440px;margin:24px auto;padding:0 18px">
     <div id="paywallBody"></div>
   </section>
+
+  <section id="home" style="display:none"></section>
 
   <section id="tab-shopping" class="tab-panel">
     <div class="panel-head"><h2>Shopping</h2><span class="hint">Tap circle = bought</span></div>
@@ -263,20 +288,12 @@
 
 <button class="fab" id="fab" onclick="App.fab()">+</button>
 
-<nav class="tabs" id="nav">
-  <button data-t="shopping" onclick="App.go('shopping')"><span class="ic">🛒</span>Shopping</button>
-  <button data-t="budget" onclick="App.go('budget')"><span class="ic">₱</span>Budget</button>
-  <button data-t="loans" onclick="App.go('loans')"><span class="ic">💳</span>Loans</button>
-  <button data-t="notes" onclick="App.go('notes')"><span class="ic">📝</span>Notes</button>
-  <button data-t="calendar" onclick="App.go('calendar')"><span class="ic">🗓️</span>Calendar</button>
-</nav>
-
 <div class="scrim" id="scrim"><div class="sheet" id="sheet"></div></div>
 <div class="toast" id="toast"></div>
 
 <script>
 const App = (() => {
-  let sb=null, tab='shopping', period='mid';
+  let sb=null, tab='home', period='mid';
   let activeLoanId = null;
   let recurringView = false;
   let payoffView = false;
@@ -285,6 +302,7 @@ const App = (() => {
 
   // default settings (stored in app_settings.data)
   const DEFAULTS = {
+    theme:'plain',
     accent:'#7c746a', bg:'#faf7f2', font:'Manrope', currency:'₱',
     payMid:15, payEnd:30, savingsPct:20,
     debtMonthly:0, loanApr:{}, loanOverdue:{},
@@ -303,26 +321,49 @@ const App = (() => {
   const monthName = ym => { const [y,m]=ym.split('-'); return new Date(y,m-1,1).toLocaleString(undefined,{month:'long',year:'numeric'}); };
   function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),2200); }
 
+  // ===== THEMES =====
+  let curTiles=null, curMascot='🌿';
+  const THEMES = {
+    plain:{label:'Plain', calli:false, mascot:'🌿',
+      v:{accent:'#6b7280',bg:'#f5f5f4',card:'#ffffff',ink:'#2b2b2e',muted:'#8b8b90',line:'#e6e6e8'},
+      tiles:[['#f0f1f3','#e5e7ea','#4b5563'],['#eef0f2','#e3e6e9','#4b5563'],['#f0f1f3','#e5e7ea','#4b5563'],['#eef0f2','#e3e6e9','#4b5563'],['#f0f1f3','#e5e7ea','#4b5563'],['#eef0f2','#e3e6e9','#4b5563']]},
+    cottagecore:{label:'CottageCore', calli:true, mascot:'🐢',
+      v:{accent:'#b5654a',bg:'#f6efe4',card:'#fff8f0',ink:'#5b4a42',muted:'#9a8a7d',line:'#eaddcb'},
+      tiles:[['#f2ddd9','#e6c3bd','#9a6660'],['#e0e8d2','#c9d6b6','#5f7050'],['#f4e9d5','#e8d6ba','#8a6d4a'],['#f4dccb','#e9bda3','#a5673f'],['#dde8e1','#c3d6cb','#4f7361'],['#f4e8c6','#e7d29e','#8a7422']]},
+    girly:{label:'Girly', calli:true, mascot:'🎀',
+      v:{accent:'#e07e97',bg:'#fdf0f4',card:'#ffffff',ink:'#6b3a4a',muted:'#b98a97',line:'#f6dbe3'},
+      tiles:[['#ffe1ea','#ffc6d7','#c05576'],['#ffd8ec','#ffbde0','#c34a8f'],['#f2ddf7','#e4c2ef','#9350a6'],['#ffe3e0','#ffc7c2','#c15a54'],['#ffeaf3','#ffd0e2','#c96a92'],['#fbe0f0','#f4c3e2','#b3468f']]},
+    manly:{label:'Manly', calli:false, mascot:'🧭',
+      v:{accent:'#2f4858',bg:'#eceded',card:'#ffffff',ink:'#1f2933',muted:'#6b7680',line:'#d5dade'},
+      tiles:[['#e6ebef','#d3dce3','#2f4858'],['#e5eae4','#d0dacb','#3d5a3f'],['#e8e8ea','#d6d7db','#333941'],['#e4ecef','#cfdee4','#2b5566'],['#ece8e2','#dcd5c9','#5a4632'],['#e7e9ec','#d4d8de','#3a4653']]},
+    dark:{label:'Dark Mode', calli:false, mascot:'🌙',
+      v:{accent:'#8aa0ff',bg:'#16181d',card:'#1f2229',ink:'#e7e8ec',muted:'#9296a1',line:'#2a2e37'},
+      tiles:[['#232733','#2a2f3d','#a9b4e6'],['#26302b','#2c3832','#a7d0b3'],['#332a2e','#3d3138','#e6a9bd'],['#2e2b33','#37323d','#c9b0e0'],['#332f26','#3d382c','#e0c98f'],['#263033','#2d3a3d','#9fd0d0']]},
+    cat:{label:'Cat', calli:true, mascot:'🐱',
+      v:{accent:'#e0894a',bg:'#fdf6ee',card:'#ffffff',ink:'#4a3b30',muted:'#a3907f',line:'#f0e2d0'},
+      tiles:[['#ffe6cf','#ffcfa3','#b0742e'],['#f6ece0','#eddcc6','#8a6d4a'],['#f0e2d4','#ddc7b0','#7a5a42'],['#ffe0e6','#ffc6d0','#b25f6e'],['#eceae6','#d9d6cf','#6b6660'],['#fbf0d6','#f2e0a8','#8a7422']]},
+    ghibli:{label:'Ghibli', calli:true, mascot:'🌿',
+      v:{accent:'#5b8a72',bg:'#eef4ec',card:'#ffffff',ink:'#3b4a42',muted:'#8aa093',line:'#dbe6db'},
+      tiles:[['#dcebf2','#bcdaeb','#356a86'],['#e2efd9','#c8e0b8','#4f7a3f'],['#f4ecd9','#e8d7b6','#8a6d3a'],['#f7dfd9','#efc2b8','#a5564a'],['#e6eee2','#cddcc6','#5f7a5a'],['#e2e9f0','#c7d5e2','#4a6076']]}
+  };
+
   function applyTheme(){
+    const TH = THEMES[S.theme] || THEMES.plain;
     const r=document.documentElement.style;
-    r.setProperty('--accent',S.accent);
-    r.setProperty('--bg',S.bg);
-    r.setProperty('--accent-soft', mix(S.accent,'#ffffff',0.82));
-    r.setProperty('--font', `'${S.font}', system-ui, sans-serif`);
-    loadFont(S.font);
+    Object.entries(TH.v).forEach(([k,val])=>r.setProperty('--'+k, String(val).trim()));
+    r.setProperty('--accent-soft', mix(TH.v.accent, TH.v.card, 0.82));
+    if(TH.calli){ r.setProperty('--font-title',"'Fleur De Leah', cursive"); r.setProperty('--font-label',"'Praise', cursive"); }
+    else { r.setProperty('--font-title',"'Quicksand', system-ui, sans-serif"); r.setProperty('--font-label',"'Quicksand', system-ui, sans-serif"); }
+    curTiles = TH.tiles; curMascot = TH.mascot;
+    if(tab==='home') renderHome();
   }
-  function mix(hex,white,t){ // simple tint
-    const h=hex.replace('#',''); const r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4,6),16);
-    const m=c=>Math.round(c+(255-c)*t); return `rgb(${m(r)},${m(g)},${m(b)})`;
+  function mix(hex,other,t){ // blend hex toward other by t
+    const p=h=>{h=h.replace('#','').trim();return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];};
+    const a=p(hex), b=p(other); const m=i=>Math.round(a[i]+(b[i]-a[i])*t);
+    return `rgb(${m(0)},${m(1)},${m(2)})`;
   }
   const loadedFonts=new Set();
-  function loadFont(f){
-    if(['system-ui','-apple-system'].includes(f)||loadedFonts.has(f))return;
-    loadedFonts.add(f);
-    const l=document.createElement('link'); l.rel='stylesheet';
-    l.href=`https://fonts.googleapis.com/css2?family=${f.replace(/ /g,'+')}:wght@400;600;700;800&display=swap`;
-    document.head.appendChild(l);
-  }
+  function loadFont(f){}
 
   /* ---------- download ICS Helper (Used for Loan Reminders) ---------- */
   function downloadICS(title, dateStr, timeStr, notes){
@@ -379,8 +420,11 @@ const App = (() => {
   function showAuth(){
     document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
     $('#paywall').style.display='none';
+    $('#home').style.display='none';
+    $('#hdrBack').style.display='none';
+    $('#hdrTitle').textContent='LifeHub';
     if(document.getElementById('mascot')) document.getElementById('mascot').style.display='none';
-    $('#nav').style.display='none';
+    /* nav removed */
     $('#fab').style.display='none';
     $('#gearBtn').style.display='none';
     $('#auth').style.display='block';
@@ -390,9 +434,9 @@ const App = (() => {
     $('#auth').style.display='none';
     $('#paywall').style.display='none';
     if(document.getElementById('mascot')) document.getElementById('mascot').style.display='none';
-    $('#nav').style.display='flex';
+    /* nav removed */
     $('#gearBtn').style.display='inline-flex';
-    go('shopping');
+    go('home');
   }
   function authToggle(){
     authMode = authMode==='login' ? 'signup' : 'login';
@@ -449,7 +493,10 @@ const App = (() => {
   function showPaywall(){
     document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
     $('#auth').style.display='none';
-    $('#nav').style.display='none';
+    $('#home').style.display='none';
+    $('#hdrBack').style.display='none';
+    $('#hdrTitle').textContent='LifeHub';
+    /* nav removed */
     $('#fab').style.display='none';
     $('#gearBtn').style.display='none';
     $('#paywall').style.display='block';
@@ -609,21 +656,31 @@ const App = (() => {
   async function del(t,id,arr){ const {error}=await sb.from(t).delete().eq('id',id); if(error){toast('Delete failed');return;} const i=arr.findIndex(x=>x.id===id); if(i>=0)arr.splice(i,1); }
 
   /* ---------- navigation ---------- */
+  const SECTION_TITLE={home:'LifeHub',shopping:'Shopping',budget:'Budget',loans:'Loans',notes:'Notes',calendar:'Calendar',settings:'Settings',payoff:'Payoff Plan'};
   function go(t){
     tab=t;
     if(t==='loans') activeLoanId = null;
     recurringView = false;
     payoffView = false;
     document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
-    $('#tab-'+t).classList.add('active');
-    document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));
-    $('#fab').style.display = (t==='settings')?'none':'grid';
+    const onHome = (t==='home');
+    $('#home').style.display = onHome ? 'block' : 'none';
+    $('#hdrBack').style.display = onHome ? 'none' : 'block';
+    $('#hdrTitle').textContent = SECTION_TITLE[t] || 'LifeHub';
+    if(!onHome){ const panel=$('#tab-'+t); if(panel) panel.classList.add('active'); }
+    $('#fab').style.display = (onHome || t==='settings') ? 'none' : 'grid';
     showMascot(t);
     window.scrollTo(0,0);
     render(t);
   }
-  const MASCOT='🐢';
+  // jump straight to the payoff planner from the home tile
+  function goPayoff(){ tab='loans'; recurringView=false; activeLoanId=null; payoffView=true;
+    document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+    $('#home').style.display='none'; $('#hdrBack').style.display='block'; $('#hdrTitle').textContent='Payoff Plan';
+    $('#tab-loans').classList.add('active'); $('#fab').style.display='none'; showMascot('loans'); window.scrollTo(0,0); renderLoans(); }
+
   const MASCOT_LINES={
+    home:['Slow and steady, lovely. You\'ve got this.','A calm little home base.','One small step today.'],
     shopping:['Let\'s grab just what you need.','A list is a plan in disguise.','Steady picks, happy wallet.'],
     budget:['Every peso you name, you tame.','You\'re the one steering here.','Small and steady wins.'],
     loans:['One step at a time — you\'re chipping away.','Progress beats perfection.','Future you says thanks.'],
@@ -631,15 +688,38 @@ const App = (() => {
     calendar:['Here\'s what\'s ahead — you\'ve got it.','No surprises on our watch.','A calm look at the days to come.'],
     settings:['Make it feel like yours.','Tinker away.']
   };
+  function mascotMsg(t){ const l=MASCOT_LINES[t]||MASCOT_LINES.home; return l[Math.floor(Math.random()*l.length)]; }
   function showMascot(t){
     const el=$('#mascot'); if(!el) return;
-    const lines=MASCOT_LINES[t]; 
+    if(t==='home'){ el.style.display='none'; return; }   // home shows its own greeting
+    const lines=MASCOT_LINES[t];
     if(!lines){ el.style.display='none'; return; }
-    const msg=lines[Math.floor(Math.random()*lines.length)];
     el.innerHTML=`<div style="display:flex;align-items:center;gap:10px;background:var(--accent-soft);border-radius:12px;padding:9px 12px;margin-bottom:12px">
-      <span style="font-size:22px;line-height:1">${MASCOT}</span>
-      <span style="font-size:13px;color:var(--accent);font-weight:600">${esc(msg)}</span></div>`;
+      <span style="font-size:22px;line-height:1">${curMascot}</span>
+      <span style="font-family:var(--font-label);font-size:16px;color:var(--accent)">${esc(mascotMsg(t))}</span></div>`;
     el.style.display='block';
+  }
+
+  const TILE_ICONS={
+    shopping:`<svg viewBox="0 0 64 64"><path d="M24 30q-8-10-2-18q6 4 4 16z" fill="#8fa574"/><path d="M40 30q8-10 2-18q-6 4-4 16z" fill="#a9b98f"/><circle cx="32" cy="16" r="4" fill="#e6a6b0"/><path d="M14 30h36l-4 22a4 4 0 0 1-4 3H22a4 4 0 0 1-4-3z" fill="#c58a5a"/><path d="M17 37H47M18 44H46M20 51H44" stroke="#a5713f" stroke-width="2" stroke-linecap="round" fill="none"/><rect x="12" y="27" width="40" height="6" rx="3" fill="#a5713f"/><path d="M20 28q12-14 24 0" stroke="#a5713f" stroke-width="3" fill="none" stroke-linecap="round"/></svg>`,
+    budget:`<svg viewBox="0 0 64 64"><path d="M46 24q10-4 12-12q-10 2-12 12z" fill="#8fa574"/><rect x="18" y="20" width="28" height="34" rx="8" fill="#cfe0d6" opacity=".7"/><rect x="18" y="20" width="28" height="34" rx="8" fill="none" stroke="#8fa574" stroke-width="2"/><rect x="16" y="13" width="32" height="9" rx="4" fill="#c58a5a"/><circle cx="27" cy="45" r="5" fill="#d8a95f"/><circle cx="37" cy="45" r="5" fill="#e0b96f"/><circle cx="32" cy="37" r="5" fill="#d8a95f"/></svg>`,
+    loans:`<svg viewBox="0 0 64 64"><path d="M14 42q6 2 8 8" stroke="#8fa574" stroke-width="2.5" fill="none" stroke-linecap="round"/><circle cx="13" cy="41" r="2.5" fill="#e6a6b0"/><circle cx="24" cy="22" r="10" fill="none" stroke="#c9a24a" stroke-width="5"/><circle cx="24" cy="22" r="3.5" fill="#f4ecdf"/><path d="M31 29L48 46" stroke="#c9a24a" stroke-width="5" stroke-linecap="round"/><path d="M42 40l6 6M46 44l-3 6" stroke="#c9a24a" stroke-width="4" stroke-linecap="round"/></svg>`,
+    payoff:`<svg viewBox="0 0 64 64"><path d="M32 40V22" stroke="#7d9a5e" stroke-width="3" stroke-linecap="round"/><path d="M32 28q-10-2-12-12q10 0 12 12z" fill="#8fa574"/><path d="M32 24q10-2 12-12q-10 0-12 12z" fill="#a9b98f"/><circle cx="32" cy="17" r="3.5" fill="#e6a6b0"/><path d="M20 40h24l-3 16a3 3 0 0 1-3 3H26a3 3 0 0 1-3-3z" fill="#c67a52"/><rect x="18" y="37" width="28" height="6" rx="3" fill="#b5654a"/></svg>`,
+    notes:`<svg viewBox="0 0 64 64"><path d="M32 20C24 14 14 16 12 18V46C16 44 26 44 32 48Z" fill="#f4ecdf" stroke="#c9a98a" stroke-width="1.5"/><path d="M32 20C40 14 50 16 52 18V46C48 44 38 44 32 48Z" fill="#faf3e7" stroke="#c9a98a" stroke-width="1.5"/><path d="M18 25H28M18 31H28M36 25H46M36 31H46" stroke="#cbb89a" stroke-width="1.5" stroke-linecap="round"/><path d="M34 36q4-1 5-4q-4 0-5 4z" fill="#8fa574"/></svg>`,
+    calendar:`<svg viewBox="0 0 64 64"><rect x="14" y="18" width="36" height="34" rx="6" fill="#faf3e7" stroke="#c9a98a" stroke-width="2"/><rect x="14" y="18" width="36" height="9" rx="6" fill="#c97b5a"/><path d="M24 13V22M40 13V22" stroke="#8a6d52" stroke-width="3" stroke-linecap="round"/><circle cx="24" cy="38" r="3" fill="#e6a6b0"/><path d="M38 45q6-2 7-8q-6 1-7 8z" fill="#8fa574"/></svg>`
+  };
+  function renderHome(){
+    const T = curTiles || THEMES.plain.tiles;
+    const items=[['shopping','Shopping'],['budget','Budget'],['loans','Loans'],['payoff','Payoff plan'],['notes','Notes'],['calendar','Calendar']];
+    let html=`<div class="home-greet"><span class="face">${curMascot}</span><p>${esc(mascotMsg('home'))}</p></div><div class="home-grid">`;
+    items.forEach(([key,label],i)=>{
+      const [c1,c2,fg]=T[i]||T[0];
+      const onclick = key==='payoff' ? 'App.goPayoff()' : `App.go('${key}')`;
+      html+=`<button class="htile" style="background:linear-gradient(160deg,${c1},${c2});color:${fg};box-shadow:0 9px 16px ${c2}88, inset 0 3px 4px rgba(255,255,255,.55), inset 0 -8px 12px ${c2}66" onclick="${onclick}">
+        ${TILE_ICONS[key]}<span class="lb">${label}</span></button>`;
+    });
+    html+='</div>';
+    $('#home').innerHTML=html;
   }
 
   /* ---------- modal ---------- */
@@ -652,7 +732,7 @@ const App = (() => {
   /* ================= RENDERERS ================= */
   function renderAll(){ render(tab); }
   function render(t){
-    ({shopping:renderShopping, budget:renderBudget,
+    ({home:renderHome, shopping:renderShopping, budget:renderBudget,
       notes:renderNotes, calendar:renderCalendar, loans:renderLoans, settings:renderSettings}[t]||(()=>{}))();
   }
 
@@ -1477,14 +1557,20 @@ const App = (() => {
   const PALETTES=[['#7c746a','Greige'],['#5f6570','Graphite'],['#6a7b8c','Slate'],['#5b8a72','Sage'],['#8c4a28','Terracotta'],['#c4717a','Rosewood'],['#4a6fa5','Blue'],['#b3823e','Amber'],['#7c6f9c','Lavender']];
   const FONTS=['Manrope','Inter','Nunito','Poppins','Lora','Quicksand','Work Sans','DM Sans'];
   function renderSettings(){
-    let html=`<div class="card"><h3 style="font-size:15px;margin-bottom:10px">Appearance</h3>
-      <div class="field"><label>Accent colour</label><div class="row" style="flex-wrap:wrap">
-        ${PALETTES.map(([c,n])=>`<button class="swatch ${S.accent===c?'on':''}" style="background:${c}" title="${n}" onclick="App.setOpt('accent','${c}')"></button>`).join('')}
-        <input type="color" value="${S.accent}" onchange="App.setOpt('accent',this.value)" style="width:34px;height:34px;border:none;background:none;padding:0" /></div></div>
-      <div class="field"><label>Background</label><div class="row">
-        ${['#faf7f2','#ffffff','#f3f5f7','#f7f3f9','#1c1b22'].map(c=>`<button class="swatch ${S.bg===c?'on':''}" style="background:${c}" onclick="App.setOpt('bg','${c}')"></button>`).join('')}</div></div>
-      <div class="field"><label>Font</label><select onchange="App.setOpt('font',this.value)">${FONTS.map(f=>`<option ${S.font===f?'selected':''}>${f}</option>`).join('')}</select></div>
-    </div>`;
+    const themeKeys=['plain','cottagecore','girly','manly','dark','cat','ghibli'];
+    let html=`<div class="card"><h3 style="font-size:15px;margin-bottom:4px">Theme</h3>
+      <p class="muted" style="font-size:12px;margin-bottom:12px">Pick a look — it changes colours, fonts, and icons everywhere.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        ${themeKeys.map(k=>{const T=THEMES[k];const sel=(S.theme||'plain')===k;
+          return `<button onclick="App.setTheme('${k}')" style="text-align:left;border-radius:14px;padding:11px 12px;border:2px solid ${sel?T.v.accent:'transparent'};background:${T.v.bg};color:${T.v.ink};box-shadow:0 2px 6px rgba(0,0,0,.06)">
+            <div style="display:flex;gap:5px;margin-bottom:7px">
+              <span style="width:16px;height:16px;border-radius:50%;background:${T.v.accent}"></span>
+              <span style="width:16px;height:16px;border-radius:50%;background:${T.tiles[1][1]}"></span>
+              <span style="width:16px;height:16px;border-radius:50%;background:${T.tiles[3][1]}"></span>
+            </div>
+            <span style="font-weight:700;font-size:13px">${T.label}</span> ${sel?'<span style="color:'+T.v.accent+'">✓</span>':''}
+          </button>`;}).join('')}
+      </div></div>`;
 
     html+=`<div class="card"><h3 style="font-size:15px;margin-bottom:10px">Budget setup</h3>
       <div class="field two"><div><label>Currency symbol</label><input value="${esc(S.currency)}" onchange="App.setOpt('currency',this.value)" /></div>
@@ -1528,7 +1614,7 @@ const App = (() => {
     html+=`<div class="card"><h3 style="font-size:15px;margin-bottom:8px">Account</h3>
       <p class="muted" style="font-size:13px;margin-bottom:4px">Signed in as <b style="color:var(--ink)">${esc(authEmail||'')}</b></p>
       <p class="muted" style="font-size:11px;word-break:break-all;margin-bottom:4px">Account ID: ${esc(uid||'')}</p>
-      <p class="muted" style="font-size:11px;margin-bottom:12px">Build <b style="color:var(--accent)">v4</b> · neutral theme</p>
+      <p class="muted" style="font-size:11px;margin-bottom:12px">Build <b style="color:var(--accent)">v5</b> · themes + home</p>
       <button class="btn line" style="width:100%;justify-content:center" onclick="App.doLogout()">Log out</button></div>`;
     $('#settingsBody').innerHTML=html;
   }
@@ -1541,6 +1627,7 @@ const App = (() => {
         <button class="btn ghost tiny" onclick="App.addCat('${key}')">Add</button></div></div>`;
   }
   async function setOpt(k,v){ S[k]=v; applyTheme(); await saveSettings(); if(tab==='settings')renderSettings(); }
+  async function setTheme(name){ S.theme=name; applyTheme(); await saveSettings(); renderSettings(); }
   async function addCat(key){ const inp=$('#newcat_'+key); const v=inp.value.trim(); if(!v)return; if(!S[key].includes(v))S[key].push(v); inp.value=''; await saveSettings(); renderSettings(); }
   async function removeCat(key,i){ S[key].splice(i,1); await saveSettings(); renderSettings(); }
   async function delRecurring(id){ await del('recurring_expenses',id,data.recurring); renderSettings(); }
@@ -1592,7 +1679,7 @@ const App = (() => {
     editLoanSettingsForm, saveLoanSettings,
     openLoanLedger, closeLoanLedger,
     openPayoff, closePayoff, setDebtMonthly, setApr, toggleOverdue,
-    setOpt, addCat, removeCat, delRecurring };
+    setOpt, setTheme, goPayoff, addCat, removeCat, delRecurring };
 })();
 document.addEventListener('DOMContentLoaded', App.init);
 </script>
