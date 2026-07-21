@@ -877,6 +877,12 @@ const App = (() => {
       <div class="field two"><div><label>Category</label><select id="f_cat">${catOptions(S.cat_shopping, isEdit?it.category:S.cat_shopping[0])}</select></div>
       <div><label>Price (₱)</label><input id="f_price" type="number" inputmode="decimal" value="${isEdit&&Number(it.price)>0?it.price:''}" placeholder="0" /></div></div>
       <div class="field"><label>Quantity / note</label><input id="f_qty" value="${isEdit?esc(it.qty||''):''}" placeholder="optional" /></div>
+      <div class="field"><label>Shopping at today</label>
+        <select id="f_store" onchange="App.onShopStoreSelect(this)">
+          <option value="">Any store</option>
+          ${(S.stores||[]).map(s=>`<option ${S.shopStore===s?'selected':''}>${esc(s)}</option>`).join('')}
+          <option value="__new__">＋ Add a store…</option>
+        </select></div>
       <div class="field"><label>Photo</label>
         <div class="row" style="gap:12px;align-items:center">
           <div id="imgPreview" style="width:64px;height:64px;border-radius:12px;border:1px solid var(--line);background:var(--bg) center/cover no-repeat;flex:none;${pendingShopImg?`background-image:url('${pendingShopImg}')`:''}"></div>
@@ -891,11 +897,22 @@ const App = (() => {
   function onShopImg(input){ const f=input.files&&input.files[0]; if(!f)return;
     compressImage(f, url=>{ pendingShopImg=url; const pv=$('#imgPreview'); if(pv) pv.style.backgroundImage=`url('${url}')`; }); }
   function clearShopImg(){ pendingShopImg=null; const pv=$('#imgPreview'); if(pv) pv.style.backgroundImage=''; const fi=$('#f_img'); if(fi) fi.value=''; }
+  async function onShopStoreSelect(sel){
+    if(sel.value==='__new__'){
+      const n=(prompt('New store name?')||'').trim();
+      if(n){ S.stores=[...(S.stores||[])]; if(!S.stores.includes(n))S.stores.push(n); await saveSettings();
+        // rebuild options with the new store selected
+        sel.innerHTML=`<option value="">Any store</option>`+S.stores.map(s=>`<option ${s===n?'selected':''}>${esc(s)}</option>`).join('')+`<option value="__new__">＋ Add a store…</option>`;
+      } else { sel.value = S.shopStore||''; }
+    }
+  }
   async function saveShop(id){
     const name=$('#f_name').value.trim(); if(!name){toast('Name needed');return;}
     const patch={ name, category:$('#f_cat').value, qty:$('#f_qty').value.trim(), price:parseFloat($('#f_price').value)||0, image:pendingShopImg||null };
     if(id){ await upd('shopping_items', id, patch, data.shopping); }
     else { patch.bought=false; await ins('shopping_items', patch, data.shopping); }
+    // remember today's shop (trip store) if one was chosen in the form
+    const st=$('#f_store'); if(st && st.value!=='__new__'){ S.shopStore=st.value; await saveSettings(); }
     pendingShopImg=null; closeSheet(); renderShopping();
   }
 
@@ -1755,7 +1772,7 @@ const App = (() => {
   return { init, go, fab, saveCreds, closeSheet,
     authSubmit, authToggle, doLogout,
     submitPayment, refreshAccess, onPayProof, approvePayment, rejectPayment,
-    toggleShop, delShop, shopForm, editShopForm, saveShop, onShopImg, clearShopImg,
+    toggleShop, delShop, shopForm, editShopForm, saveShop, onShopImg, clearShopImg, onShopStoreSelect,
     setShopSubtab, setShopStore, setGroceryLimit, addStore, removeStore, addProductRow, removeProductRow, setPrice,
     setPeriod, shiftMonth, renderBudget, incomeForm, saveIncome, delInc,
     incomeAddForm, editIncomeForm, saveIncomeLine, delIncomeLine,
