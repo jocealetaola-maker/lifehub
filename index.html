@@ -198,12 +198,12 @@
   #home{max-width:760px;margin:0 auto;padding:4px 2px}
   .home-greet{display:flex;align-items:center;gap:11px;background:var(--accent-soft);border-radius:16px;padding:12px 14px;margin:6px 2px 18px}
   .home-greet .face{font-size:26px;line-height:1}
-  .home-greet p{font-family:var(--font-label);font-size:17px;color:var(--accent);margin:0}
+  .home-greet p{font-family:var(--font-label);font-weight:700;font-size:16px;color:var(--accent);margin:0}
   .home-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
   .htile{border-radius:26px;padding:20px 12px 15px;text-align:center;transition:transform .12s;border:none;cursor:pointer;width:100%}
   .htile:active{transform:scale(.96)}
   .htile svg{width:52px;height:52px;filter:drop-shadow(0 4px 5px rgba(0,0,0,.15))}
-  .htile .lb{font-family:var(--font-label);font-size:21px;margin-top:5px;display:block;line-height:1.1}
+  .htile .lb{font-family:var(--font-label);font-weight:700;font-size:16px;margin-top:6px;display:block;line-height:1.1}
 </style>
 
 </head>
@@ -297,6 +297,7 @@ const App = (() => {
   let activeLoanId = null;
   let recurringView = false;
   let payoffView = false;
+  let shopSubtab = 'list';
   let month = new Date().toISOString().slice(0,7); // YYYY-MM
   const LS = { url:'lh_url', key:'lh_key' };
 
@@ -306,6 +307,7 @@ const App = (() => {
     accent:'#7c746a', bg:'#faf7f2', font:'Manrope', currency:'₱',
     payMid:15, payEnd:30, savingsPct:20,
     debtMonthly:0, loanApr:{}, loanOverdue:{},
+    stores:[], priceBook:{}, groceryLimit:0, shopStore:'',
     cat_shopping:['Groceries','House things','Personal care','Pharmacy','Other'],
     cat_budget:['Bills','Food','Transport','Subscriptions','Health','Misc']
   };
@@ -352,7 +354,7 @@ const App = (() => {
     const r=document.documentElement.style;
     Object.entries(TH.v).forEach(([k,val])=>r.setProperty('--'+k, String(val).trim()));
     r.setProperty('--accent-soft', mix(TH.v.accent, TH.v.card, 0.82));
-    if(TH.calli){ r.setProperty('--font-title',"'Fleur De Leah', cursive"); r.setProperty('--font-label',"'Praise', cursive"); }
+    if(TH.calli){ r.setProperty('--font-title',"'Fleur De Leah', cursive"); r.setProperty('--font-label',"'Quicksand', system-ui, sans-serif"); }
     else { r.setProperty('--font-title',"'Quicksand', system-ui, sans-serif"); r.setProperty('--font-label',"'Quicksand', system-ui, sans-serif"); }
     curTiles = TH.tiles; curMascot = TH.mascot;
     if(tab==='home') renderHome();
@@ -696,7 +698,7 @@ const App = (() => {
     if(!lines){ el.style.display='none'; return; }
     el.innerHTML=`<div style="display:flex;align-items:center;gap:10px;background:var(--accent-soft);border-radius:12px;padding:9px 12px;margin-bottom:12px">
       <span style="font-size:22px;line-height:1">${curMascot}</span>
-      <span style="font-family:var(--font-label);font-size:16px;color:var(--accent)">${esc(mascotMsg(t))}</span></div>`;
+      <span style="font-family:var(--font-label);font-weight:700;font-size:14px;color:var(--accent)">${esc(mascotMsg(t))}</span></div>`;
     el.style.display='block';
   }
 
@@ -739,14 +741,44 @@ const App = (() => {
   /* ----- Shopping ----- */
   function renderShopping(){
     const wrap=$('#shoppingList');
-    if(!data.shopping.length){ wrap.innerHTML=emptyState('Nothing on the list','Tap + to add your first item — with a price and a photo'); return; }
+    const seg=`<div class="seg" style="margin-bottom:14px">
+      <button class="${shopSubtab==='list'?'on':''}" onclick="App.setShopSubtab('list')">🧺 List</button>
+      <button class="${shopSubtab==='prices'?'on':''}" onclick="App.setShopSubtab('prices')">🏷️ Prices</button></div>`;
+    if(shopSubtab==='prices'){ wrap.innerHTML = seg + priceTableHTML(); return; }
+
+    // ---- LIST VIEW ----
+    const stores = S.stores||[];
+    const storeOpts = `<option value="">Any store</option>`+stores.map(s=>`<option ${S.shopStore===s?'selected':''}>${esc(s)}</option>`).join('');
+    const controls = `<div class="card" style="margin-bottom:12px">
+      <div class="field two" style="margin-bottom:0">
+        <div><label>Shopping at</label><select onchange="App.setShopStore(this.value)">${storeOpts}</select></div>
+        <div><label>Trip budget (₱)</label><input type="number" inputmode="decimal" value="${S.groceryLimit||''}" placeholder="0" onchange="App.setGroceryLimit(this.value)" /></div>
+      </div></div>`;
+
+    if(!data.shopping.length){ wrap.innerHTML = seg + controls + emptyState('Nothing on the list','Tap + to add your first item — with a price and a photo'); return; }
     const byCat={};
     data.shopping.forEach(i=>{ (byCat[i.category]=byCat[i.category]||[]).push(i); });
     const toBuy=data.shopping.filter(i=>!i.bought);
     const totalToBuy=toBuy.reduce((s,i)=>s+Number(i.price||0),0);
     const totalAll=data.shopping.reduce((s,i)=>s+Number(i.price||0),0);
-    let html=`<div class="summary">
-      <div class="stat ${'good'}"><div class="k">To-buy total</div><div class="v">${money(totalToBuy)}</div></div>
+
+    // grocery budget bar
+    const limit=Number(S.groceryLimit||0);
+    let limitBar='';
+    if(limit>0){
+      const pct=Math.min(100, Math.round(totalToBuy/limit*100));
+      const over=totalToBuy>limit;
+      limitBar=`<div class="card" style="margin-bottom:12px">
+        <div class="row" style="font-size:13px"><span class="muted">Trip budget</span><div class="spacer"></div>
+          <b style="color:${over?'var(--bad)':'var(--good)'}">${money(totalToBuy)} / ${money(limit)}</b></div>
+        <div style="height:9px;border-radius:6px;background:var(--line);margin-top:8px;overflow:hidden">
+          <div style="height:100%;width:${pct}%;background:${over?'var(--bad)':'var(--good)'}"></div></div>
+        ${over?`<div class="muted" style="font-size:12px;color:var(--bad);margin-top:6px">Over budget by ${money(totalToBuy-limit)} — maybe drop a non-essential?</div>`:''}
+      </div>`;
+    }
+
+    let html=seg+controls+limitBar+`<div class="summary">
+      <div class="stat good"><div class="k">To-buy total</div><div class="v">${money(totalToBuy)}</div></div>
       <div class="stat"><div class="k">List total</div><div class="v">${money(totalAll)}</div></div></div>`;
     Object.keys(byCat).sort().forEach(cat=>{
       const items=byCat[cat].sort((a,b)=>a.bought-b.bought);
@@ -754,11 +786,15 @@ const App = (() => {
       const catSum=items.filter(i=>!i.bought).reduce((s,i)=>s+Number(i.price||0),0);
       html+=`<div class="group-title">${esc(cat)} <span class="count">${left} to buy · ${money(catSum)}</span></div><div class="card">`;
       items.forEach(i=>{
-        const meta=[i.qty?esc(i.qty):'', Number(i.price)>0?money(i.price):''].filter(Boolean).join(' · ');
+        // if a store is chosen and we know this item's price there, show it as a hint
+        let storeHint='';
+        if(S.shopStore && S.priceBook && S.priceBook[i.name] && S.priceBook[i.name][S.shopStore]!=null)
+          storeHint = ` · ${esc(S.shopStore)}: ${money(S.priceBook[i.name][S.shopStore])}`;
+        const meta=[i.qty?esc(i.qty):'', Number(i.price)>0?money(i.price):''].filter(Boolean).join(' · ')+storeHint;
         html+=`<div class="item ${i.bought?'done':''}">
           <button class="check ${i.bought?'on':''}" onclick="App.toggleShop('${i.id}')">${i.bought?'✓':''}</button>
           ${i.image?`<img src="${i.image}" alt="" style="width:44px;height:44px;border-radius:10px;object-fit:cover;flex:none" onclick="App.editShopForm('${i.id}')" />`:''}
-          <div class="body"><div class="title">${esc(i.name)}</div>${meta?`<div class="meta">${meta}</div>`:''}</div>
+          <div class="body"><div class="title">${esc(i.name)}</div>${meta.trim()?`<div class="meta">${meta}</div>`:''}</div>
           <div class="acts">
             <button class="icon-btn" onclick="App.editShopForm('${i.id}')">✏️</button>
             <button class="icon-btn del" onclick="App.delShop('${i.id}')">✕</button></div>
@@ -768,6 +804,54 @@ const App = (() => {
     });
     wrap.innerHTML=html;
   }
+
+  /* ----- Grocery price comparison table ----- */
+  function priceTableHTML(){
+    const stores = S.stores||[];
+    const products = Object.keys(S.priceBook||{});
+    let html=`<div class="card" style="margin-bottom:12px"><p class="muted" style="font-size:12px;margin:0">
+      Log prices from your receipts. Rows are products, columns are stores. The cheapest store for each item is highlighted 💚.</p></div>
+      <div class="row" style="gap:8px;margin-bottom:10px">
+        <button class="btn ghost tiny" onclick="App.addProductRow()">+ Product</button>
+        <button class="btn ghost tiny" onclick="App.addStore()">+ Store</button>
+      </div>`;
+    if(!stores.length && !products.length){
+      return html+emptyState('No price book yet','Add a store and a product to start comparing prices across shops.');
+    }
+    html+=`<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table style="border-collapse:collapse;min-width:100%;font-size:13px">
+      <thead><tr>
+        <th style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);position:sticky;left:0;background:var(--card)">Product</th>
+        ${stores.map(s=>`<th style="padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap">${esc(s)}<br><button class="icon-btn del" style="margin-top:4px" onclick="App.removeStore('${esc(s)}')">✕</button></th>`).join('')}
+      </tr></thead><tbody>`;
+    if(!products.length){
+      html+=`<tr><td colspan="${stores.length+1}" class="muted" style="padding:12px">Add a product to start.</td></tr>`;
+    }
+    products.forEach(p=>{
+      const row=S.priceBook[p]||{};
+      const vals=stores.map(s=>Number(row[s])).filter(v=>v>0);
+      const cheapest=vals.length?Math.min(...vals):null;
+      html+=`<tr>
+        <td style="padding:8px 10px;border-bottom:1px solid var(--line);position:sticky;left:0;background:var(--card);white-space:nowrap">
+          ${esc(p)} <button class="icon-btn del" onclick="App.removeProductRow('${esc(p)}')" style="vertical-align:middle">✕</button></td>
+        ${stores.map(s=>{
+          const v=row[s]; const isCheap=cheapest!=null && Number(v)===cheapest && Number(v)>0;
+          return `<td style="padding:6px 8px;border-bottom:1px solid var(--line);background:${isCheap?'var(--accent-soft)':'transparent'}">
+            <input type="number" inputmode="decimal" value="${v!=null?v:''}" placeholder="—" onchange="App.setPrice('${esc(p)}','${esc(s)}',this.value)"
+              style="width:70px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);${isCheap?'font-weight:700;color:var(--accent)':''}" /></td>`;
+        }).join('')}
+      </tr>`;
+    });
+    html+=`</tbody></table></div>`;
+    return html;
+  }
+  function setShopSubtab(s){ shopSubtab=s; renderShopping(); }
+  async function setShopStore(v){ S.shopStore=v; await saveSettings(); renderShopping(); }
+  async function setGroceryLimit(v){ S.groceryLimit=parseFloat(v)||0; await saveSettings(); renderShopping(); }
+  async function addStore(){ const n=(prompt('Store name?')||'').trim(); if(!n)return; S.stores=[...(S.stores||[])]; if(!S.stores.includes(n))S.stores.push(n); await saveSettings(); renderShopping(); }
+  async function removeStore(name){ if(!confirm('Remove '+name+' column?'))return; S.stores=(S.stores||[]).filter(s=>s!==name); Object.keys(S.priceBook||{}).forEach(p=>{ if(S.priceBook[p]) delete S.priceBook[p][name]; }); if(S.shopStore===name)S.shopStore=''; await saveSettings(); renderShopping(); }
+  async function addProductRow(){ const n=(prompt('Product name?')||'').trim(); if(!n)return; S.priceBook={...(S.priceBook||{})}; if(!S.priceBook[n])S.priceBook[n]={}; await saveSettings(); renderShopping(); }
+  async function removeProductRow(p){ if(!confirm('Remove '+p+'?'))return; S.priceBook={...(S.priceBook||{})}; delete S.priceBook[p]; await saveSettings(); renderShopping(); }
+  async function setPrice(product,store,val){ S.priceBook={...(S.priceBook||{})}; S.priceBook[product]={...(S.priceBook[product]||{})}; const n=parseFloat(val); if(isNaN(n))delete S.priceBook[product][store]; else S.priceBook[product][store]=n; await saveSettings(); renderShopping(); }
   async function toggleShop(id){ const i=data.shopping.find(x=>x.id===id); await upd('shopping_items',id,{bought:!i.bought},data.shopping); renderShopping(); }
   async function delShop(id){ await del('shopping_items',id,data.shopping); renderShopping(); }
 
@@ -1656,7 +1740,11 @@ const App = (() => {
   function emptyState(b,p){ return `<div class="empty"><b>${b}</b>${p}</div>`; }
 
   /* ----- FAB router ----- */
-  function fab(){ if(tab==='budget'&&recurringView){ recurringForm(); return; } ({shopping:shopForm,budget:expenseForm,loans:loanForm,notes:()=>noteForm(),calendar:()=>noteForm(calSel||todayStr())}[tab]||(()=>{}))(); }
+  function fab(){
+    if(tab==='budget'&&recurringView){ recurringForm(); return; }
+    if(tab==='shopping'&&shopSubtab==='prices'){ addProductRow(); return; }
+    ({shopping:shopForm,budget:expenseForm,loans:loanForm,notes:()=>noteForm(),calendar:()=>noteForm(calSel||todayStr())}[tab]||(()=>{}))();
+  }
 
   /* ----- init ----- */
   function init(){
@@ -1668,6 +1756,7 @@ const App = (() => {
     authSubmit, authToggle, doLogout,
     submitPayment, refreshAccess, onPayProof, approvePayment, rejectPayment,
     toggleShop, delShop, shopForm, editShopForm, saveShop, onShopImg, clearShopImg,
+    setShopSubtab, setShopStore, setGroceryLimit, addStore, removeStore, addProductRow, removeProductRow, setPrice,
     setPeriod, shiftMonth, renderBudget, incomeForm, saveIncome, delInc,
     incomeAddForm, editIncomeForm, saveIncomeLine, delIncomeLine,
     recurringForm, editRecurringForm, saveRecurring, askDelRecurring, openRecurring, closeRecurring,
