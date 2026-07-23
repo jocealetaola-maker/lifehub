@@ -711,7 +711,7 @@ const App = (() => {
   };
   function renderHome(){
     const T = curTiles || THEMES.plain.tiles;
-    const items=[['shopping','Shopping'],['budget','Budget'],['loans','Loans'],['payoff','Payoff plan'],['notes','Notes'],['calendar','Calendar']];
+    const items=[['shopping','Shopping'],['budget','Budget'],['loans','Loans'],['notes','Notes'],['calendar','Calendar']];
     let html=`<div class="home-greet"><span class="face">${curMascot}</span><p>${esc(mascotMsg('home'))}</p></div><div class="home-grid">`;
     items.forEach(([key,label],i)=>{
       const [c1,c2,fg]=T[i]||T[0];
@@ -1310,6 +1310,17 @@ const App = (() => {
     });
     return { calc, finalBalance: running };
   }
+  // Actual position: what's owed and paid using ONLY real payments (ignores planned/simulated)
+  function computeActual(loan){
+    const rows = data.periods.filter(p=>p.loan_id===loan.id).sort(sortPeriods);
+    let owed = Number(loan.balance||0), paid = 0;
+    rows.forEach(p=>{
+      if(p.period==='end') owed += Number(loan.installment||0);
+      const pay = p.status==='paid' ? Number(p.paid_amount||0) : 0;
+      owed -= pay; paid += pay;
+    });
+    return { owed, paid };
+  }
 
   function renderLoans(){
     const wrap = $('#loanBody');
@@ -1318,26 +1329,34 @@ const App = (() => {
     
     // PAGE A: DASHBOARD VIEW
     if (!activeLoanId) {
-      let html = `<button class="btn" style="width:100%;justify-content:center;padding:12px;margin-top:6px" onclick="App.openPayoff()">📋 Payoff Plan — heal my credit</button>
+      const totalOwed = data.loans.reduce((s,l)=>{const a=computeActual(l); return s+Math.max(0,a.owed);},0);
+      let html = `<div class="summary" style="margin-top:6px">
+          <div class="stat ${totalOwed>0?'bad':'good'}"><div class="k">Total still to pay</div><div class="v">${money(totalOwed)}</div></div>
+          <div class="stat"><div class="k">Loans</div><div class="v">${data.loans.length}</div></div>
+        </div>
         <div style="display:grid; grid-template-columns:1fr; gap:14px; margin-top:14px;">`;
       data.loans.forEach(loan => {
-        const rows = data.periods.filter(p=>p.loan_id===loan.id).sort(sortPeriods);
-        const activePlanCount = rows.filter(p => p.status !== 'paid' && Number(p.planned_payment) > 0).length;
-        const finalBal = computeWaterfall(loan).finalBalance;
-        const remTxt = finalBal > 0 ? 'Remaining: '+money(finalBal) : finalBal < 0 ? 'Credit ahead: '+money(-finalBal) : 'Cleared 🎉';
-        const remCls = finalBal > 0 ? 'warn' : 'good';
+        const a = computeActual(loan);
+        const owed = a.owed;
+        const remTxt = owed > 0 ? money(owed)+' to pay' : owed < 0 ? 'Credit ahead: '+money(-owed) : 'Cleared 🎉';
+        const remCls = owed > 0 ? 'warn' : 'good';
         html += `<div class="card" style="border-left: 6px solid var(--accent); padding:16px; background:var(--card)">
           <div class="row">
             <h3 style="font-size:18px; color:var(--ink)">${esc(loan.name)}</h3>
             <div class="spacer"></div>
             <span class="pill ${remCls}" style="font-size:13px; padding:4px 10px;">${remTxt}</span>
           </div>
-          <p class="muted" style="font-size:13px; margin:6px 0 14px 0;">
-            Installment: <b>${money(loan.installment)}/mo</b> ${loan.notes ? `· ${esc(loan.notes)}` : ''}
-            ${activePlanCount > 0 ? `<br><span style="color:var(--accent)">➔ ${activePlanCount} active simulations</span>` : ''}
-          </p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0 6px">
+            <div style="background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 11px">
+              <div class="muted" style="font-size:11px">Still owed</div>
+              <div style="font-weight:800;font-variant-numeric:tabular-nums;color:${owed>0?'var(--warn)':'var(--good)'}">${money(Math.max(0,owed))}</div></div>
+            <div style="background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 11px">
+              <div class="muted" style="font-size:11px">Paid so far</div>
+              <div style="font-weight:800;font-variant-numeric:tabular-nums;color:var(--good)">${money(a.paid)}</div></div>
+          </div>
+          <p class="muted" style="font-size:12px; margin:4px 0 12px 0;">Installment: <b>${money(loan.installment)}/mo</b> ${loan.notes ? `· ${esc(loan.notes)}` : ''}</p>
           <div class="row" style="gap:10px;">
-            <button class="btn tiny" style="padding:8px 14px; border-radius:10px;" onclick="App.openLoanLedger('${loan.id}')">🔎 Open Planning Ledger</button>
+            <button class="btn tiny" style="padding:8px 14px; border-radius:10px;" onclick="App.openLoanLedger('${loan.id}')">📋 Planning ledger</button>
             <button class="btn ghost tiny" onclick="App.editLoanSettingsForm('${loan.id}')">⚙︎ Baseline</button>
             <button class="btn line tiny" style="color:var(--bad); border:none;" onclick="App.delLoan('${loan.id}')">✕ Wipe</button>
           </div>
