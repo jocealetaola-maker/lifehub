@@ -14,7 +14,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fleur+De+Leah&family=Praise&family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Marcellus&family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet">
 
 <style>
   :root{
@@ -252,10 +252,6 @@
       <div class="m" id="monthLabel"></div>
       <button onclick="App.shiftMonth(1)">›</button>
     </div>
-    <div class="seg" id="periodSeg">
-      <button data-p="mid" class="on" onclick="App.setPeriod('mid')">Mid-month (15th)</button>
-      <button data-p="end" onclick="App.setPeriod('end')">End-month (30th)</button>
-    </div>
     <div id="budgetBody"></div>
   </section>
 
@@ -298,6 +294,8 @@ const App = (() => {
   let recurringView = false;
   let payoffView = false;
   let shopSubtab = 'list';
+  let budgetPeriodOpen = null;
+  let ledgerShowHidden = false;
   let month = new Date().toISOString().slice(0,7); // YYYY-MM
   const LS = { url:'lh_url', key:'lh_key' };
 
@@ -307,7 +305,7 @@ const App = (() => {
     accent:'#7c746a', bg:'#faf7f2', font:'Manrope', currency:'₱',
     payMid:15, payEnd:30, savingsPct:20,
     debtMonthly:0, loanApr:{}, loanOverdue:{},
-    stores:[], priceBook:{}, groceryLimit:0, shopStore:'',
+    stores:[], priceBook:{}, groceryLimit:0, shopStore:'', hiddenPeriods:{},
     cat_shopping:['Groceries','House things','Personal care','Pharmacy','Other'],
     cat_budget:['Bills','Food','Transport','Subscriptions','Health','Misc']
   };
@@ -354,8 +352,8 @@ const App = (() => {
     const r=document.documentElement.style;
     Object.entries(TH.v).forEach(([k,val])=>r.setProperty('--'+k, String(val).trim()));
     r.setProperty('--accent-soft', mix(TH.v.accent, TH.v.card, 0.82));
-    if(TH.calli){ r.setProperty('--font-title',"'Fleur De Leah', cursive"); r.setProperty('--font-label',"'Quicksand', system-ui, sans-serif"); }
-    else { r.setProperty('--font-title',"'Quicksand', system-ui, sans-serif"); r.setProperty('--font-label',"'Quicksand', system-ui, sans-serif"); }
+    r.setProperty('--font-title',"'Marcellus', serif");
+    r.setProperty('--font-label',"'Quicksand', system-ui, sans-serif");
     curTiles = TH.tiles; curMascot = TH.mascot;
     if(tab==='home') renderHome();
   }
@@ -664,6 +662,7 @@ const App = (() => {
     if(t==='loans') activeLoanId = null;
     recurringView = false;
     payoffView = false;
+    budgetPeriodOpen = null;
     document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
     const onHome = (t==='home');
     $('#home').style.display = onHome ? 'block' : 'none';
@@ -832,7 +831,7 @@ const App = (() => {
       const cheapest=vals.length?Math.min(...vals):null;
       html+=`<tr>
         <td style="padding:8px 10px;border-bottom:1px solid var(--line);position:sticky;left:0;background:var(--card);white-space:nowrap">
-          ${esc(p)} <button class="icon-btn del" onclick="App.removeProductRow('${esc(p)}')" style="vertical-align:middle">✕</button></td>
+          <span onclick="App.renameProduct('${esc(p)}')" style="cursor:pointer;border-bottom:1px dashed var(--muted)">${esc(p)}</span> <button class="icon-btn del" onclick="App.removeProductRow('${esc(p)}')" style="vertical-align:middle">✕</button></td>
         ${stores.map(s=>{
           const v=row[s]; const isCheap=cheapest!=null && Number(v)===cheapest && Number(v)>0;
           return `<td style="padding:6px 8px;border-bottom:1px solid var(--line);background:${isCheap?'var(--accent-soft)':'transparent'}">
@@ -851,6 +850,7 @@ const App = (() => {
   async function removeStore(name){ if(!confirm('Remove '+name+' column?'))return; S.stores=(S.stores||[]).filter(s=>s!==name); Object.keys(S.priceBook||{}).forEach(p=>{ if(S.priceBook[p]) delete S.priceBook[p][name]; }); if(S.shopStore===name)S.shopStore=''; await saveSettings(); renderShopping(); }
   async function addProductRow(){ const n=(prompt('Product name?')||'').trim(); if(!n)return; S.priceBook={...(S.priceBook||{})}; if(!S.priceBook[n])S.priceBook[n]={}; await saveSettings(); renderShopping(); }
   async function removeProductRow(p){ if(!confirm('Remove '+p+'?'))return; S.priceBook={...(S.priceBook||{})}; delete S.priceBook[p]; await saveSettings(); renderShopping(); }
+  async function renameProduct(old){ const n=(prompt('Rename product',old)||'').trim(); if(!n||n===old)return; S.priceBook={...(S.priceBook||{})}; S.priceBook[n]={...(S.priceBook[old]||{})}; delete S.priceBook[old]; await saveSettings(); renderShopping(); }
   async function setPrice(product,store,val){ S.priceBook={...(S.priceBook||{})}; S.priceBook[product]={...(S.priceBook[product]||{})}; const n=parseFloat(val); if(isNaN(n))delete S.priceBook[product][store]; else S.priceBook[product][store]=n; await saveSettings(); renderShopping(); }
   async function toggleShop(id){ const i=data.shopping.find(x=>x.id===id); await upd('shopping_items',id,{bought:!i.bought},data.shopping); renderShopping(); }
   async function delShop(id){ await del('shopping_items',id,data.shopping); renderShopping(); }
@@ -921,49 +921,66 @@ const App = (() => {
   function shiftMonth(d){ const dt=new Date(month+'-01'); dt.setMonth(dt.getMonth()+d); month=dt.toISOString().slice(0,7); autoLogRecurring().then(renderBudget); }
   function periodsActive(){ return [period]; }
 
+  function perStats(per){
+    const exps=data.expenses.filter(e=>e.month===month && e.period===per);
+    const incs=data.incomes.filter(i=>i.month===month && i.period===per);
+    const income=incs.reduce((s,i)=>s+Number(i.amount||0),0);
+    const planned=exps.filter(e=>e.status==='planned'), paid=exps.filter(e=>e.status==='paid');
+    const sumPlanned=planned.reduce((s,e)=>s+Number(e.amount||0),0);
+    const sumPaid=paid.reduce((s,e)=>s+Number(e.amount||0),0);
+    return {income,incs,planned,paid,sumPlanned,sumPaid,remaining:income-sumPaid-sumPlanned};
+  }
   function renderBudget(){
     if(recurringView){ renderRecurringPage(); return; }
     $('#monthLabel').textContent=monthName(month);
-    $('#budgetHint').textContent = 'Pay periods: 15th & 30th';
-    const ps=periodsActive();
-    let html='', totIncome=0, totPaid=0, totPlanned=0;
-    ps.forEach(per=>{
-      const exps=data.expenses.filter(e=>e.month===month && e.period===per);
-      const incs=data.incomes.filter(i=>i.month===month && i.period===per);
-      const income=incs.reduce((s,i)=>s+Number(i.amount||0),0);
-      const planned=exps.filter(e=>e.status==='planned'), paid=exps.filter(e=>e.status==='paid');
-      const sumPlanned=planned.reduce((s,e)=>s+Number(e.amount||0),0);
-      const sumPaid=paid.reduce((s,e)=>s+Number(e.amount||0),0);
-      const remaining=income-sumPaid-sumPlanned;
-      totIncome+=income; totPaid+=sumPaid; totPlanned+=sumPlanned;
+    $('#budgetHint').textContent = budgetPeriodOpen ? (budgetPeriodOpen==='mid'?'15th · Mid-month':'30th · End-month') : 'Tap a payday to open it';
+    if(budgetPeriodOpen){ renderBudgetPeriodDetail(budgetPeriodOpen); return; }
 
-      let incRows = incs.map(i=>{
-        return `<div class="exp"><span class="nm">${esc(i.label||'Income')}</span>
-          <span class="amt" style="color:var(--good)">${money(i.amount)}</span>
-          <button class="icon-btn" onclick="App.editIncomeForm('${i.id}')">✏️</button><button class="icon-btn del" onclick="App.delIncomeLine('${i.id}')">✕</button></div>`;
-      }).join('');
-      if(!incs.length) incRows = `<p class="muted" style="font-size:13px;padding:4px 2px">No income yet for this period.</p>`;
-
-      html+=`<div class="group-title" style="font-size:15px;color:var(--ink);margin-top:20px">
-          ${per==='mid'?'15th · Mid-month':'30th · End-month'} <span class="count">${money(income)} in</span></div>
-        <div class="card">
-          <div class="row" style="margin-bottom:6px"><span class="muted" style="font-size:13px">Income · <b style="color:var(--ink)">${money(income)}</b></span><div class="spacer"></div>
-            <button class="btn ghost tiny" onclick="App.incomeAddForm('${per}')">+ Add income</button></div>
-          ${incRows}
-        </div>
-        ${groupBlock('Planned', planned, 'planned')}
-        ${groupBlock('Paid', paid, 'paid')}
-        <div class="summary" style="margin-top:10px"><div class="stat big ${remaining<0?'bad':'good'}">
-          <div class="k">Left this period</div><div class="v">${money(remaining)}</div></div></div>`;
-    });
+    // ---- MONTH LANDING: two payday icons ----
+    const mid=perStats('mid'), end=perStats('end');
+    const totIncome=mid.income+end.income, totPaid=mid.sumPaid+end.sumPaid, totPlanned=mid.sumPlanned+end.sumPlanned;
     const allRemaining=totIncome-totPaid-totPlanned;
     const savings=Math.max(0, allRemaining*(S.savingsPct/100));
-    html = `<div class="summary">
+    const recTot=recurringMonthlyTotals().total;
+    const tile=(onclick,badge,label,stat,statColor)=>`
+      <button onclick="${onclick}" style="text-align:center;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:14px 6px 12px;box-shadow:0 6px 14px rgba(0,0,0,.06);cursor:pointer;width:100%">
+        <div style="width:52px;height:52px;border-radius:50%;margin:0 auto;background:var(--accent-soft);display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:inset 0 2px 4px rgba(255,255,255,.5)">${badge}</div>
+        <div style="font-family:var(--font-label);font-weight:700;font-size:14px;margin-top:8px;color:var(--ink)">${label}</div>
+        <div style="font-size:11px;margin-top:3px;color:${statColor||'var(--muted)'}">${stat}</div>
+      </button>`;
+    const numBadge=(n,ic)=>`<span style="font-size:19px;font-weight:800;color:var(--accent);line-height:1">${n}</span><span style="font-size:11px;line-height:1;margin-top:1px">${ic}</span>`;
+    let html=`<div class="summary">
         <div class="stat ${allRemaining<0?'bad':'good'}"><div class="k">Remaining this month</div><div class="v">${money(allRemaining)}</div></div>
         <div class="stat good"><div class="k">Suggested savings (${S.savingsPct}%)</div><div class="v">${money(savings)}</div></div>
-        <div class="stat"><div class="k">Income</div><div class="v">${money(totIncome)}</div></div>
-        <div class="stat"><div class="k">Paid + planned</div><div class="v">${money(totPaid+totPlanned)}</div></div>
-      </div>` + html + recurringEntryCard();
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px">
+        ${tile("App.openBudgetPeriod('mid')",numBadge('15','☀️'),'Mid-month','Left '+money(mid.remaining),mid.remaining<0?'var(--bad)':'var(--good)')}
+        ${tile("App.openBudgetPeriod('end')",numBadge('30','🌙'),'End-month','Left '+money(end.remaining),end.remaining<0?'var(--bad)':'var(--good)')}
+        ${tile("App.openRecurring()",'<span style="font-size:24px">🔁</span>','Recurring',money(recTot)+'/mo')}
+      </div>`;
+    $('#budgetBody').innerHTML=html;
+  }
+  function openBudgetPeriod(p){ budgetPeriodOpen=p; period=p; renderBudget(); window.scrollTo(0,0); }
+  function closeBudgetPeriod(){ budgetPeriodOpen=null; renderBudget(); window.scrollTo(0,0); }
+
+  function renderBudgetPeriodDetail(per){
+    const st=perStats(per);
+    let incRows = st.incs.map(i=>`<div class="exp"><span class="nm">${esc(i.label||'Income')}</span>
+        <span class="amt" style="color:var(--good)">${money(i.amount)}</span>
+        <button class="icon-btn" onclick="App.editIncomeForm('${i.id}')">✏️</button><button class="icon-btn del" onclick="App.delIncomeLine('${i.id}')">✕</button></div>`).join('');
+    if(!st.incs.length) incRows = `<p class="muted" style="font-size:13px;padding:4px 2px">No income yet for this period.</p>`;
+    let html=`<button class="btn line tiny" style="margin-bottom:12px" onclick="App.closeBudgetPeriod()">‹ Back to month</button>
+      <div class="group-title" style="font-size:16px;color:var(--ink);margin-top:2px">
+        ${per==='mid'?'☀️ 15th · Mid-month':'🌙 30th · End-month'} <span class="count">${money(st.income)} in</span></div>
+      <div class="card">
+        <div class="row" style="margin-bottom:6px"><span class="muted" style="font-size:13px">Income · <b style="color:var(--ink)">${money(st.income)}</b></span><div class="spacer"></div>
+          <button class="btn ghost tiny" onclick="App.incomeAddForm('${per}')">+ Add income</button></div>
+        ${incRows}
+      </div>
+      ${groupBlock('Planned', st.planned, 'planned')}
+      ${groupBlock('Paid', st.paid, 'paid')}
+      <div class="summary" style="margin-top:10px"><div class="stat big ${st.remaining<0?'bad':'good'}">
+        <div class="k">Left this period</div><div class="v">${money(st.remaining)}</div></div></div>`;
     $('#budgetBody').innerHTML=html;
   }
 
@@ -1352,8 +1369,14 @@ const App = (() => {
       </div>
     </div>`;
 
+    const HP = S.hiddenPeriods||{};
+    const hiddenCount = calc.filter(c=>HP[c.p.id]).length;
+    if(hiddenCount){ html+=`<button class="btn line tiny" style="margin-top:12px" onclick="App.toggleLedgerHidden()">${ledgerShowHidden?'🙈 Hide':'👁 Show'} ${hiddenCount} hidden paid window${hiddenCount>1?'s':''}</button>`; }
+
     calc.forEach((c, index) => {
       const p = c.p;
+      const isHidden = !!HP[p.id];
+      if(isHidden && !ledgerShowHidden) return;
       const startingBalanceThisPeriod = c.startBal;
       const addedInstallment = c.accrual;
       const totalStackedDue = c.totalDue;
@@ -1367,10 +1390,11 @@ const App = (() => {
       const cls = p.status === 'paid' ? 'good' : effectivePayment > 0 ? 'warn' : 'gray';
       const lbl = p.status === 'paid' ? 'Paid' : effectivePayment > 0 ? 'Simulated Plan' : 'Unplanned';
 
-      html+=`<div style="border:1px solid var(--line); border-radius:12px; padding:14px; margin-top:12px; background:var(--card)">
+      html+=`<div style="border:1px solid var(--line); border-radius:12px; padding:14px; margin-top:12px; background:var(--card);${isHidden?'opacity:.55':''}">
         <div class="row">
           <b style="font-size:14px">${monthShort(p.month)} · ${PERIOD_LABEL(p.period)}</b>
           <span class="pill ${cls}" style="margin-left:8px">${lbl}</span>
+          ${isHidden?'<span class="pill gray" style="margin-left:6px">Hidden</span>':''}
           <div class="spacer"></div>
           <span class="muted" style="font-size:12px">Due Target: ${fmtDay(p.due_date)}</span>
         </div>
@@ -1398,7 +1422,8 @@ const App = (() => {
           ${p.status !== 'paid'
             ? `<button class="btn ghost tiny" onclick="App.planForm('${p.id}')">✏️ Set/Edit Plan</button>
                <button class="btn tiny" onclick="App.payForm('${p.id}', ${payDefault})">✅ Log Payment</button>`
-            : `<button class="btn line tiny" onclick="App.unpayPeriod('${p.id}')">↩️ Undo Payment</button>`}
+            : `<button class="btn line tiny" onclick="App.unpayPeriod('${p.id}')">↩️ Undo Payment</button>
+               <button class="btn line tiny" onclick="App.toggleHidePeriod('${p.id}')">${isHidden?'👁 Unhide':'🙈 Hide'}</button>`}
           <button class="btn line tiny" onclick="App.remindLoan('${p.id}')">🔔 Remind</button>
           ${index === calc.length - 1 ? `<button class="btn line tiny" onclick="App.extendNextPeriod('${loan.id}', '${p.month}', '${p.period}')">➕ Map Next Period</button>` : ''}
           <button class="btn line tiny" style="color:var(--bad)" onclick="App.delPeriod('${p.id}')">✕ Remove Window</button>
@@ -1409,8 +1434,10 @@ const App = (() => {
   }
 
   /* ----- Router Toggles ----- */
-  function openLoanLedger(id) { activeLoanId = id; renderLoans(); window.scrollTo(0,0); }
+  function openLoanLedger(id) { activeLoanId = id; ledgerShowHidden=false; renderLoans(); window.scrollTo(0,0); }
   function closeLoanLedger() { activeLoanId = null; renderLoans(); window.scrollTo(0,0); }
+  async function toggleHidePeriod(id){ const h={...(S.hiddenPeriods||{})}; if(h[id])delete h[id]; else h[id]=true; S.hiddenPeriods=h; await saveSettings(); renderLoans(); }
+  function toggleLedgerHidden(){ ledgerShowHidden=!ledgerShowHidden; renderLoans(); }
 
   /* ----- Debt payoff planner (credit healing) ----- */
   function openPayoff(){ payoffView=true; renderLoans(); window.scrollTo(0,0); }
@@ -1657,38 +1684,39 @@ const App = (() => {
   /* ----- Settings ----- */
   const PALETTES=[['#7c746a','Greige'],['#5f6570','Graphite'],['#6a7b8c','Slate'],['#5b8a72','Sage'],['#8c4a28','Terracotta'],['#c4717a','Rosewood'],['#4a6fa5','Blue'],['#b3823e','Amber'],['#7c6f9c','Lavender']];
   const FONTS=['Manrope','Inter','Nunito','Poppins','Lora','Quicksand','Work Sans','DM Sans'];
+  let settingsOpen={};
+  function toggleSettings(k){ settingsOpen[k]=!settingsOpen[k]; renderSettings(); }
+  function acc(key,title,badge,content){
+    const open=!!settingsOpen[key];
+    return `<div class="card" style="padding:0;overflow:hidden">
+      <button onclick="App.toggleSettings('${key}')" style="width:100%;text-align:left;padding:14px 16px;display:flex;align-items:center;gap:8px;background:none">
+        <span style="font-weight:700;font-size:15px">${title}</span>${badge?`<span class="muted" style="font-size:12px">${badge}</span>`:''}
+        <span class="spacer"></span><span style="color:var(--muted);font-size:18px;display:inline-block;transform:rotate(${open?'90deg':'0'});transition:transform .15s">›</span></button>
+      ${open?`<div style="padding:2px 16px 16px">${content}</div>`:''}
+    </div>`;
+  }
   function renderSettings(){
     const themeKeys=['plain','cottagecore','girly','manly','dark','cat','ghibli'];
-    let html=`<div class="card"><h3 style="font-size:15px;margin-bottom:4px">Theme</h3>
-      <p class="muted" style="font-size:12px;margin-bottom:12px">Pick a look — it changes colours, fonts, and icons everywhere.</p>
+    const themeContent=`<p class="muted" style="font-size:12px;margin-bottom:12px">Changes colours, fonts, and icons everywhere.</p>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         ${themeKeys.map(k=>{const T=THEMES[k];const sel=(S.theme||'plain')===k;
           return `<button onclick="App.setTheme('${k}')" style="text-align:left;border-radius:14px;padding:11px 12px;border:2px solid ${sel?T.v.accent:'transparent'};background:${T.v.bg};color:${T.v.ink};box-shadow:0 2px 6px rgba(0,0,0,.06)">
             <div style="display:flex;gap:5px;margin-bottom:7px">
               <span style="width:16px;height:16px;border-radius:50%;background:${T.v.accent}"></span>
               <span style="width:16px;height:16px;border-radius:50%;background:${T.tiles[1][1]}"></span>
-              <span style="width:16px;height:16px;border-radius:50%;background:${T.tiles[3][1]}"></span>
-            </div>
+              <span style="width:16px;height:16px;border-radius:50%;background:${T.tiles[3][1]}"></span></div>
             <span style="font-weight:700;font-size:13px">${T.label}</span> ${sel?'<span style="color:'+T.v.accent+'">✓</span>':''}
           </button>`;}).join('')}
-      </div></div>`;
-
-    html+=`<div class="card"><h3 style="font-size:15px;margin-bottom:10px">Budget setup</h3>
-      <div class="field two"><div><label>Currency symbol</label><input value="${esc(S.currency)}" onchange="App.setOpt('currency',this.value)" /></div>
+      </div>`;
+    const budgetContent=`<div class="field two"><div><label>Currency symbol</label><input value="${esc(S.currency)}" onchange="App.setOpt('currency',this.value)" /></div>
       <div><label>Savings target %</label><input type="number" value="${S.savingsPct}" onchange="App.setOpt('savingsPct',+this.value)" /></div></div>
       <div class="field two"><div><label>Mid-month pay day</label><input type="number" value="${S.payMid}" onchange="App.setOpt('payMid',+this.value)" /></div>
-      <div><label>End-month pay day</label><input type="number" value="${S.payEnd}" onchange="App.setOpt('payEnd',+this.value)" /></div></div></div>`;
+      <div><label>End-month pay day</label><input type="number" value="${S.payEnd}" onchange="App.setOpt('payEnd',+this.value)" /></div></div>`;
 
-    html+=catEditor('Shopping categories','cat_shopping');
-    html+=catEditor('Budget categories','cat_budget');
-
-    html+=`<div class="card"><h3 style="font-size:15px;margin-bottom:6px">Recurring expense templates</h3>
-      <p class="muted" style="font-size:12px">These auto-add as planned each month. Mark an expense "recurring" when adding it to create one.</p>`;
-    if(data.recurring.length){ html+='<div style="margin-top:8px">'; data.recurring.forEach(r=>{
-      html+=`<div class="exp"><span class="nm">${esc(r.name)} <span class="muted">· ${r.period==='mid'?'Mid':'End'} · ${esc(r.category)}</span></span><span class="amt">${money(r.amount)}</span>
-        <button class="icon-btn del" style="margin-left:8px" onclick="App.delRecurring('${r.id}')">✕</button></div>`;
-    }); html+='</div>'; } else html+='<p class="muted" style="font-size:13px;margin-top:6px">None yet.</p>';
-    html+='</div>';
+    let html = acc('theme','Theme',THEMES[S.theme||'plain'].label,themeContent);
+    html += acc('budget','Budget setup','',budgetContent);
+    html += acc('cat_shopping','Shopping categories','',catEditor('cat_shopping'));
+    html += acc('cat_budget','Budget categories','',catEditor('cat_budget'));
 
     if(isAdmin()){
       const subs = data.submissions.slice().sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
@@ -1706,26 +1734,22 @@ const App = (() => {
             : `<span class="pill ${cls}">${st}</span>`}
         </div>`;
       }).join('');
-      html+=`<div class="card"><h3 style="font-size:15px;margin-bottom:8px">💳 Payments <span class="muted" style="font-size:12px">· ${pend.length} pending</span></h3>${rows}</div>`;
+      html += acc('payments','💳 Payments',pend.length+' pending',rows);
     }
 
-    html+=`<div class="card"><h3 style="font-size:15px;margin-bottom:8px">Add to Home Screen</h3>
-      <p class="muted" style="font-size:13px">In Safari: tap <b>Share</b> → <b>Add to Home Screen</b>. LifeHub then opens full-screen like an app.</p></div>`;
-
-    html+=`<div class="card"><h3 style="font-size:15px;margin-bottom:8px">Account</h3>
-      <p class="muted" style="font-size:13px;margin-bottom:4px">Signed in as <b style="color:var(--ink)">${esc(authEmail||'')}</b></p>
+    html += acc('home','Add to Home Screen','',`<p class="muted" style="font-size:13px">In Safari: tap <b>Share</b> → <b>Add to Home Screen</b>. LifeHub then opens full-screen like an app.</p>`);
+    html += acc('account','Account','',`<p class="muted" style="font-size:13px;margin-bottom:4px">Signed in as <b style="color:var(--ink)">${esc(authEmail||'')}</b></p>
       <p class="muted" style="font-size:11px;word-break:break-all;margin-bottom:4px">Account ID: ${esc(uid||'')}</p>
-      <p class="muted" style="font-size:11px;margin-bottom:12px">Build <b style="color:var(--accent)">v5</b> · themes + home</p>
-      <button class="btn line" style="width:100%;justify-content:center" onclick="App.doLogout()">Log out</button></div>`;
+      <p class="muted" style="font-size:11px;margin-bottom:12px">Build <b style="color:var(--accent)">v7</b></p>
+      <button class="btn line" style="width:100%;justify-content:center" onclick="App.doLogout()">Log out</button>`);
     $('#settingsBody').innerHTML=html;
   }
-  function catEditor(title,key){
-    return `<div class="card"><h3 style="font-size:15px;margin-bottom:10px">${title}</h3>
-      <div class="chips" id="chips_${key}">
+  function catEditor(key){
+    return `<div class="chips" id="chips_${key}">
         ${S[key].map((c,i)=>`<span class="chip">${esc(c)}<button onclick="App.removeCat('${key}',${i})">✕</button></span>`).join('')}
       </div>
-      <div class="row" style="margin-top:10px"><input id="newcat_${key}" placeholder="Add category" style="flex:1;padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:var(--bg)" />
-        <button class="btn ghost tiny" onclick="App.addCat('${key}')">Add</button></div></div>`;
+      <div class="row" style="margin-top:10px"><input id="newcat_${key}" placeholder="Add category" style="flex:1;padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)" />
+        <button class="btn ghost tiny" onclick="App.addCat('${key}')">Add</button></div>`;
   }
   async function setOpt(k,v){ S[k]=v; applyTheme(); await saveSettings(); if(tab==='settings')renderSettings(); }
   async function setTheme(name){ S.theme=name; applyTheme(); await saveSettings(); renderSettings(); }
@@ -1773,7 +1797,7 @@ const App = (() => {
     authSubmit, authToggle, doLogout,
     submitPayment, refreshAccess, onPayProof, approvePayment, rejectPayment,
     toggleShop, delShop, shopForm, editShopForm, saveShop, onShopImg, clearShopImg, onShopStoreSelect,
-    setShopSubtab, setShopStore, setGroceryLimit, addStore, removeStore, addProductRow, removeProductRow, setPrice,
+    setShopSubtab, setShopStore, setGroceryLimit, addStore, removeStore, addProductRow, removeProductRow, renameProduct, setPrice,
     setPeriod, shiftMonth, renderBudget, incomeForm, saveIncome, delInc,
     incomeAddForm, editIncomeForm, saveIncomeLine, delIncomeLine,
     recurringForm, editRecurringForm, saveRecurring, askDelRecurring, openRecurring, closeRecurring,
@@ -1785,7 +1809,7 @@ const App = (() => {
     editLoanSettingsForm, saveLoanSettings,
     openLoanLedger, closeLoanLedger,
     openPayoff, closePayoff, setDebtMonthly, setApr, toggleOverdue,
-    setOpt, setTheme, goPayoff, addCat, removeCat, delRecurring };
+    setOpt, setTheme, toggleSettings, goPayoff, openBudgetPeriod, closeBudgetPeriod, toggleHidePeriod, toggleLedgerHidden, addCat, removeCat, delRecurring };
 })();
 document.addEventListener('DOMContentLoaded', App.init);
 </script>
