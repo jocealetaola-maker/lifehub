@@ -295,6 +295,7 @@ const App = (() => {
   let payoffView = false;
   let shopSubtab = 'list';
   let budgetPeriodOpen = null;
+  let budgetTab = "mid";
   let ledgerShowHidden = false;
   let month = new Date().toISOString().slice(0,7); // YYYY-MM
   const LS = { url:'lh_url', key:'lh_key' };
@@ -304,7 +305,7 @@ const App = (() => {
     theme:'plain',
     accent:'#7c746a', bg:'#faf7f2', font:'Manrope', currency:'₱',
     payMid:15, payEnd:30, savingsPct:20,
-    debtMonthly:0, loanApr:{}, loanOverdue:{},
+    debtMonthly:0, loanApr:{}, loanOverdue:{}, loanDues:{}, loanPayments:{},
     stores:[], priceBook:{}, groceryLimit:0, shopStore:'', hiddenPeriods:{},
     cat_shopping:['Groceries','House things','Personal care','Pharmacy','Other'],
     cat_budget:['Bills','Food','Transport','Subscriptions','Health','Misc']
@@ -663,6 +664,7 @@ const App = (() => {
     recurringView = false;
     payoffView = false;
     budgetPeriodOpen = null;
+    if(t==='budget'){ budgetTab='mid'; period='mid'; activeLoanId=null; }
     document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
     const onHome = (t==='home');
     $('#home').style.display = onHome ? 'block' : 'none';
@@ -675,11 +677,6 @@ const App = (() => {
     render(t);
   }
   // jump straight to the payoff planner from the home tile
-  function goPayoff(){ tab='loans'; recurringView=false; activeLoanId=null; payoffView=true;
-    document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
-    $('#home').style.display='none'; $('#hdrBack').style.display='block'; $('#hdrTitle').textContent='Payoff Plan';
-    $('#tab-loans').classList.add('active'); $('#fab').style.display='none'; showMascot('loans'); window.scrollTo(0,0); renderLoans(); }
-
   const MASCOT_LINES={
     home:['Slow and steady, lovely. You\'ve got this.','A calm little home base.','One small step today.'],
     shopping:['Let\'s grab just what you need.','A list is a plan in disguise.','Steady picks, happy wallet.'],
@@ -711,11 +708,11 @@ const App = (() => {
   };
   function renderHome(){
     const T = curTiles || THEMES.plain.tiles;
-    const items=[['shopping','Shopping'],['budget','Budget'],['loans','Loans'],['notes','Notes'],['calendar','Calendar']];
+    const items=[['shopping','Shopping'],['budget','Budget'],['notes','Notes'],['calendar','Calendar']];
     let html=`<div class="home-greet"><span class="face">${curMascot}</span><p>${esc(mascotMsg('home'))}</p></div><div class="home-grid">`;
     items.forEach(([key,label],i)=>{
       const [c1,c2,fg]=T[i]||T[0];
-      const onclick = key==='payoff' ? 'App.goPayoff()' : `App.go('${key}')`;
+      const onclick = `App.go('${key}')`;
       html+=`<button class="htile" style="background:linear-gradient(160deg,${c1},${c2});color:${fg};box-shadow:0 9px 16px ${c2}88, inset 0 3px 4px rgba(255,255,255,.55), inset 0 -8px 12px ${c2}66" onclick="${onclick}">
         ${TILE_ICONS[key]}<span class="lb">${label}</span></button>`;
     });
@@ -931,57 +928,68 @@ const App = (() => {
     return {income,incs,planned,paid,sumPlanned,sumPaid,remaining:income-sumPaid-sumPlanned};
   }
   function renderBudget(){
-    if(recurringView){ renderRecurringPage(); return; }
     $('#monthLabel').textContent=monthName(month);
-    $('#budgetHint').textContent = budgetPeriodOpen ? (budgetPeriodOpen==='mid'?'15th · Mid-month':'30th · End-month') : 'Tap a payday to open it';
-    if(budgetPeriodOpen){ renderBudgetPeriodDetail(budgetPeriodOpen); return; }
-
-    // ---- MONTH LANDING: two payday icons ----
-    const mid=perStats('mid'), end=perStats('end');
-    const totIncome=mid.income+end.income, totPaid=mid.sumPaid+end.sumPaid, totPlanned=mid.sumPlanned+end.sumPlanned;
-    const allRemaining=totIncome-totPaid-totPlanned;
-    const savings=Math.max(0, allRemaining*(S.savingsPct/100));
-    const recTot=recurringMonthlyTotals().total;
-    const tile=(onclick,badge,label,stat,statColor)=>`
-      <button onclick="${onclick}" style="text-align:center;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:14px 6px 12px;box-shadow:0 6px 14px rgba(0,0,0,.06);cursor:pointer;width:100%">
-        <div style="width:52px;height:52px;border-radius:50%;margin:0 auto;background:var(--accent-soft);display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:inset 0 2px 4px rgba(255,255,255,.5)">${badge}</div>
-        <div style="font-family:var(--font-label);font-weight:700;font-size:14px;margin-top:8px;color:var(--ink)">${label}</div>
-        <div style="font-size:11px;margin-top:3px;color:${statColor||'var(--muted)'}">${stat}</div>
-      </button>`;
-    const numBadge=(n,ic)=>`<span style="font-size:19px;font-weight:800;color:var(--accent);line-height:1">${n}</span><span style="font-size:11px;line-height:1;margin-top:1px">${ic}</span>`;
-    let html=`<div class="summary">
-        <div class="stat ${allRemaining<0?'bad':'good'}"><div class="k">Remaining this month</div><div class="v">${money(allRemaining)}</div></div>
-        <div class="stat good"><div class="k">Suggested savings (${S.savingsPct}%)</div><div class="v">${money(savings)}</div></div>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px">
-        ${tile("App.openBudgetPeriod('mid')",numBadge('15','☀️'),'Mid-month','Left '+money(mid.remaining),mid.remaining<0?'var(--bad)':'var(--good)')}
-        ${tile("App.openBudgetPeriod('end')",numBadge('30','🌙'),'End-month','Left '+money(end.remaining),end.remaining<0?'var(--bad)':'var(--good)')}
-        ${tile("App.openRecurring()",'<span style="font-size:24px">🔁</span>','Recurring',money(recTot)+'/mo')}
-      </div>`;
-    $('#budgetBody').innerHTML=html;
+    $('#budgetHint').textContent='';
+    const tabs=[['mid','15','☀️','15th'],['end','30','🌙','30th'],['recurring','🔁','','Recurring'],['loans','💳','','Loans']];
+    let row=`<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px">`;
+    tabs.forEach(([key,a,b,label])=>{
+      const on=budgetTab===key;
+      const badge = (key==='mid'||key==='end')
+        ? `<span style="font-size:16px;font-weight:800;line-height:1;color:${on?'#fff':'var(--accent)'}">${a}</span><span style="font-size:10px;line-height:1">${b}</span>`
+        : `<span style="font-size:20px">${a}</span>`;
+      row+=`<button onclick="App.setBudgetTab('${key}')" style="text-align:center;border:none;border-radius:16px;padding:9px 3px;background:${on?'var(--accent)':'var(--accent-soft)'}">
+        <div style="width:40px;height:40px;border-radius:50%;margin:0 auto;background:${on?'rgba(255,255,255,.22)':'var(--card)'};display:flex;flex-direction:column;align-items:center;justify-content:center">${badge}</div>
+        <div style="font-family:var(--font-label);font-weight:700;font-size:11px;margin-top:5px;color:${on?'#fff':'var(--accent)'}">${label}</div></button>`;
+    });
+    row+=`</div>`;
+    let body;
+    if(budgetTab==='recurring') body=recurringInner();
+    else if(budgetTab==='loans') body=loansContentHTML();
+    else body=periodInner(budgetTab);
+    $('#budgetBody').innerHTML=row+body;
   }
-  function openBudgetPeriod(p){ budgetPeriodOpen=p; period=p; renderBudget(); window.scrollTo(0,0); }
-  function closeBudgetPeriod(){ budgetPeriodOpen=null; renderBudget(); window.scrollTo(0,0); }
+  function setBudgetTab(k){ budgetTab=k; activeLoanId=null; if(k==='mid'||k==='end') period=k; renderBudget(); window.scrollTo(0,0); }
 
-  function renderBudgetPeriodDetail(per){
+  function periodInner(per){
     const st=perStats(per);
+    const dateStr = dueDateStr(month, per==='mid'? (S.payMid||15) : (S.payEnd||30));
     let incRows = st.incs.map(i=>`<div class="exp"><span class="nm">${esc(i.label||'Income')}</span>
         <span class="amt" style="color:var(--good)">${money(i.amount)}</span>
         <button class="icon-btn" onclick="App.editIncomeForm('${i.id}')">✏️</button><button class="icon-btn del" onclick="App.delIncomeLine('${i.id}')">✕</button></div>`).join('');
     if(!st.incs.length) incRows = `<p class="muted" style="font-size:13px;padding:4px 2px">No income yet for this period.</p>`;
-    let html=`<button class="btn line tiny" style="margin-bottom:12px" onclick="App.closeBudgetPeriod()">‹ Back to month</button>
-      <div class="group-title" style="font-size:16px;color:var(--ink);margin-top:2px">
-        ${per==='mid'?'☀️ 15th · Mid-month':'🌙 30th · End-month'} <span class="count">${money(st.income)} in</span></div>
-      <div class="card">
-        <div class="row" style="margin-bottom:6px"><span class="muted" style="font-size:13px">Income · <b style="color:var(--ink)">${money(st.income)}</b></span><div class="spacer"></div>
-          <button class="btn ghost tiny" onclick="App.incomeAddForm('${per}')">+ Add income</button></div>
-        ${incRows}
-      </div>
-      ${groupBlock('Planned', st.planned, 'planned')}
-      ${groupBlock('Paid', st.paid, 'paid')}
-      <div class="summary" style="margin-top:10px"><div class="stat big ${st.remaining<0?'bad':'good'}">
-        <div class="k">Left this period</div><div class="v">${money(st.remaining)}</div></div></div>`;
-    $('#budgetBody').innerHTML=html;
+    return `<div class="group-title" style="font-size:16px;color:var(--ink);margin-top:2px">
+          ${per==='mid'?'☀️ 15th · Mid-month':'🌙 30th · End-month'} <span class="count">${money(st.income)} in</span></div>
+        <div class="card">
+          <div class="row" style="margin-bottom:6px"><span class="muted" style="font-size:13px">Income · <b style="color:var(--ink)">${money(st.income)}</b></span><div class="spacer"></div>
+            <button class="btn ghost tiny" onclick="App.incomeAddForm('${per}')">+ Add income</button></div>
+          ${incRows}
+        </div>
+        ${groupBlock('Planned', st.planned, 'planned')}
+        ${groupBlock('Paid', st.paid, 'paid')}
+        <div class="summary" style="margin-top:10px"><div class="stat big ${st.remaining<0?'bad':'good'}">
+          <div class="k">Left this period</div><div class="v">${money(st.remaining)}</div></div></div>
+        ${loanPaydaySection(dateStr)}`;
+  }
+  function loanPaydaySection(dateStr){
+    if(!data.loans.length) return '';
+    const rows=data.loans.map(loan=>{
+      const list=(S.loanPayments&&S.loanPayments[loan.id])||[];
+      const pay=list.find(p=>p.date===dateStr && p.src==='payday');
+      const amt=pay?pay.amount:'';
+      const pos=loanPosition(loan);
+      return `<div class="exp"><span class="nm">${esc(loan.name)} <span class="muted" style="font-size:11px">· ${pos.owed>0?money(pos.owed)+' left':pos.owed<0?'credit '+money(-pos.owed):'cleared'}</span></span>
+        <input type="number" inputmode="decimal" value="${amt}" placeholder="0" onchange="App.setPayPeriodAmount('${loan.id}','${dateStr}',this.value)" style="width:96px;padding:7px 9px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink);text-align:right" /></div>`;
+    }).join('');
+    return `<div class="group-title" style="margin-top:20px">💳 Loan payments on ${fmtDay(dateStr)}</div>
+      <div class="card"><p class="muted" style="font-size:12px;margin-bottom:6px">Set what you'll pay each loan this payday. It updates that loan's ledger.</p>${rows}</div>`;
+  }
+  async function setPayPeriodAmount(loanId, dateStr, val){
+    const amt=parseFloat(val)||0;
+    S.loanPayments={...(S.loanPayments||{})}; let list=[...(S.loanPayments[loanId]||[])];
+    const idx=list.findIndex(p=>p.date===dateStr && p.src==='payday');
+    if(amt>0){ if(idx>=0) list[idx]={...list[idx],amount:amt}; else list.push({id:'pp'+Date.now(), date:dateStr, amount:amt, src:'payday', note:'Payday'}); }
+    else if(idx>=0){ list.splice(idx,1); }
+    S.loanPayments[loanId]=list; await saveSettings(); renderBudget();
   }
 
   /* ----- Recurring charges: compact entry (bottom of Budget) + its own page ----- */
@@ -990,25 +998,7 @@ const App = (() => {
     data.recurring.filter(r=>r.active!==false).forEach(r=>{ if(r.period==='mid')mid+=Number(r.amount||0); else end+=Number(r.amount||0); });
     return {mid,end,total:mid+end};
   }
-  function recurringEntryCard(){
-    const n=data.recurring.length;
-    const t=recurringMonthlyTotals();
-    return `<div class="group-title" style="margin-top:22px">Recurring</div>
-      <div class="card" onclick="App.openRecurring()" style="cursor:pointer;display:flex;align-items:center;gap:12px">
-        <div style="font-size:22px">🔁</div>
-        <div style="flex:1">
-          <div style="font-weight:700">Recurring charges</div>
-          <div class="muted" style="font-size:12px">${n} item${n===1?'':'s'} · ${money(t.total)}/mo (15th ${money(t.mid)} · 30th ${money(t.end)})</div>
-        </div>
-        <div style="font-size:22px;color:var(--muted)">›</div>
-      </div>`;
-  }
-  function openRecurring(){ recurringView=true; renderBudget(); window.scrollTo(0,0); }
-  function closeRecurring(){ recurringView=false; renderBudget(); window.scrollTo(0,0); }
-
-  function renderRecurringPage(){
-    $('#monthLabel').textContent=monthName(month);
-    $('#budgetHint').textContent='Recurring charges';
+  function recurringInner(){
     const list = data.recurring.slice().sort((a,b)=>(a.period+a.name).localeCompare(b.period+b.name));
     const t=recurringMonthlyTotals();
     let inner='';
@@ -1025,21 +1015,19 @@ const App = (() => {
         <button class="icon-btn" onclick="App.editRecurringForm('${r.id}')">✏️</button>
         <button class="icon-btn del" onclick="App.askDelRecurring('${r.id}')">✕</button></div>`;
     }).join('');
-    const html=`
-      <button class="btn line tiny" style="margin-bottom:12px" onclick="App.closeRecurring()">‹ Back to budget</button>
-      <div class="panel-head" style="margin-bottom:10px"><h2 style="font-size:20px">🔁 Recurring charges</h2></div>
-      <div class="summary" style="margin-bottom:4px">
+    return `<div class="summary" style="margin-bottom:4px">
         <div class="stat"><div class="k">15th / month</div><div class="v">${money(t.mid)}</div></div>
         <div class="stat"><div class="k">30th / month</div><div class="v">${money(t.end)}</div></div>
         <div class="stat big"><div class="k">Total recurring / month</div><div class="v">${money(t.total)}</div></div>
       </div>
       <div class="card">
-        <div class="row" style="margin-bottom:8px"><span class="muted" style="font-size:12px">Auto-added as planned each month within their timeframe</span><div class="spacer"></div>
+        <div class="row" style="margin-bottom:8px"><span class="muted" style="font-size:12px">Auto-added as planned each month</span><div class="spacer"></div>
           <button class="btn ghost tiny" onclick="App.recurringForm()">+ Add recurring</button></div>
         ${inner}
       </div>`;
-    $('#budgetBody').innerHTML=html;
   }
+  function openRecurring(){ setBudgetTab('recurring'); }
+  function closeRecurring(){ setBudgetTab('mid'); }
   function recurringForm(){ openRecurringSheet(null); }
   function editRecurringForm(id){ openRecurringSheet(data.recurring.find(r=>r.id===id)); }
   function openRecurringSheet(r){
@@ -1243,9 +1231,11 @@ const App = (() => {
   function calPick(ds){ calSel=ds; renderCalendar(); }
   function calMarks(){
     const marks={};
-    data.periods.filter(p=>p.status!=='paid' && p.due_date && p.due_date.startsWith(calMonth)).forEach(p=>{
-      const loan=data.loans.find(l=>l.id===p.loan_id);
-      (marks[p.due_date]=marks[p.due_date]||{pay:[],note:[]}).pay.push({name:loan?loan.name:'Payment', amount:(p.planned_payment||p.due_amount)});
+    data.loans.forEach(loan=>{
+      ((S.loanDues&&S.loanDues[loan.id])||[]).forEach(d=>{
+        const ds=dueDateStr(calMonth, d.day);
+        (marks[ds]=marks[ds]||{pay:[],note:[]}).pay.push({name:loan.name, amount:Number(d.amount)||0});
+      });
     });
     data.notes.filter(n=>n.date && n.date.startsWith(calMonth)).forEach(n=>{
       (marks[n.date]=marks[n.date]||{pay:[],note:[]}).note.push(n);
@@ -1296,408 +1286,176 @@ const App = (() => {
 
   // Single source of truth: derive every window's balance from the fixed base (loan.balance),
   // carrying any overpayment forward as a negative (credit) into the next window.
-  function computeWaterfall(loan){
-    const rows = data.periods.filter(p=>p.loan_id===loan.id).sort(sortPeriods);
-    let running = Number(loan.balance||0);            // fixed base / arrears = starting point
-    const calc = rows.map(p=>{
-      const accrual  = p.period==='end' ? Number(loan.installment||0) : 0;   // amortization only on the 30th
-      const startBal = running;
-      const totalDue = startBal + accrual;
-      const payment  = p.status==='paid' ? Number(p.paid_amount||0) : Number(p.planned_payment||0);
-      const after    = totalDue - payment;             // NO clamp: negative = credit rolled forward
-      running = after;
-      return { p, accrual, startBal, totalDue, payment, after };
-    });
-    return { calc, finalBalance: running };
+  /* ----- Loans engine: dated dues + payments ----- */
+  const ordinal=n=>{n=Number(n)||0;const s=['th','st','nd','rd'],v=n%100;return n+(s[(v-20)%10]||s[v]||s[0]);};
+  function daysInMonth(ym){ const [y,m]=ym.split('-').map(Number); return new Date(y,m,0).getDate(); }
+  function dueDateStr(ym, day){ const d=Math.min(Number(day)||1, daysInMonth(ym)); return ym+'-'+String(d).padStart(2,'0'); }
+  function monthsBetween(a,b){ const out=[]; let [y,m]=a.split('-').map(Number); const [ey,em]=b.split('-').map(Number); let g=0; while((y<ey||(y===ey&&m<=em)) && g<240){ out.push(y+'-'+String(m).padStart(2,'0')); m++; if(m>12){m=1;y++;} g++; } return out; }
+  function loanFloor(loan){ return (loan.created_at? String(loan.created_at).slice(0,10) : (month+'-01')); }
+  function loanDueList(loan){ return (S.loanDues&&S.loanDues[loan.id])||[]; }
+  function loanPayList(loan){ return ((S.loanPayments&&S.loanPayments[loan.id])||[]).slice().sort((a,b)=>a.date<b.date?-1:1); }
+  function loanDueOccurrences(loan, through){
+    const floor=loanFloor(loan), startYM=floor.slice(0,7), endYM=through.slice(0,7);
+    const dues=loanDueList(loan), out=[];
+    monthsBetween(startYM,endYM).forEach(ym=>dues.forEach(d=>{ const ds=dueDateStr(ym,d.day); if(ds>=floor && ds<=through) out.push({date:ds, amount:Number(d.amount)||0}); }));
+    return out;
   }
-  // Actual position: what's owed and paid using ONLY real payments (ignores planned/simulated)
-  function computeActual(loan){
-    const rows = data.periods.filter(p=>p.loan_id===loan.id).sort(sortPeriods);
-    let owed = Number(loan.balance||0), paid = 0;
-    rows.forEach(p=>{
-      if(p.period==='end') owed += Number(loan.installment||0);
-      const pay = p.status==='paid' ? Number(p.paid_amount||0) : 0;
-      owed -= pay; paid += pay;
-    });
-    return { owed, paid };
+  function loanPosition(loan){
+    const t=todayStr();
+    const dueSum=loanDueOccurrences(loan,t).reduce((s,d)=>s+d.amount,0);
+    const paid=loanPayList(loan).filter(p=>p.date<=t).reduce((s,p)=>s+(Number(p.amount)||0),0);
+    return {owed: Number(loan.balance||0)+dueSum-paid, paid};
+  }
+  function loanLedgerEvents(loan){
+    const eom=dueDateStr(todayStr().slice(0,7), 31);
+    const dues=loanDueOccurrences(loan, eom).map(d=>({date:d.date,type:'due',amount:d.amount}));
+    const pays=loanPayList(loan).map(p=>({date:p.date,type:'pay',amount:Number(p.amount)||0,id:p.id,note:p.note}));
+    const ev=dues.concat(pays).sort((a,b)=> a.date<b.date?-1:a.date>b.date?1:(a.type==='due'?-1:1));
+    let bal=Number(loan.balance||0); ev.forEach(e=>{ bal += e.type==='due'?e.amount:-e.amount; e.bal=bal; });
+    return ev;
   }
 
-  function renderLoans(){
-    const wrap = $('#loanBody');
-    if(payoffView){ renderPayoff(); return; }
-    if(!data.loans.length){ wrap.innerHTML=emptyState('No loans yet','Add a balance you are paying down. Each pay period it stays due until cleared, and whatever is left rolls into the next period.'); return; }
-    
-    // PAGE A: DASHBOARD VIEW
-    if (!activeLoanId) {
-      const totalOwed = data.loans.reduce((s,l)=>{const a=computeActual(l); return s+Math.max(0,a.owed);},0);
-      let html = `<div class="summary" style="margin-top:6px">
+  function loansContentHTML(){
+    if(!data.loans.length) return emptyState('No loans yet','Add a balance you are paying down, set its due date(s) and amount, then log your payments.')+`<div style="text-align:center;margin-top:12px"><button class="btn" onclick="App.loanForm()">+ Add loan</button></div>`;
+    if(!activeLoanId){
+      const totalOwed=data.loans.reduce((s,l)=>s+Math.max(0,loanPosition(l).owed),0);
+      let html=`<div class="row" style="margin-bottom:12px"><div class="summary" style="flex:1;margin:0">
           <div class="stat ${totalOwed>0?'bad':'good'}"><div class="k">Total still to pay</div><div class="v">${money(totalOwed)}</div></div>
-          <div class="stat"><div class="k">Loans</div><div class="v">${data.loans.length}</div></div>
-        </div>
-        <div style="display:grid; grid-template-columns:1fr; gap:14px; margin-top:14px;">`;
-      data.loans.forEach(loan => {
-        const a = computeActual(loan);
-        const owed = a.owed;
-        const remTxt = owed > 0 ? money(owed)+' to pay' : owed < 0 ? 'Credit ahead: '+money(-owed) : 'Cleared 🎉';
-        const remCls = owed > 0 ? 'warn' : 'good';
-        html += `<div class="card" style="border-left: 6px solid var(--accent); padding:16px; background:var(--card)">
-          <div class="row">
-            <h3 style="font-size:18px; color:var(--ink)">${esc(loan.name)}</h3>
-            <div class="spacer"></div>
-            <span class="pill ${remCls}" style="font-size:13px; padding:4px 10px;">${remTxt}</span>
-          </div>
+        </div></div>
+        <button class="btn" style="width:100%;justify-content:center;margin-bottom:14px" onclick="App.loanForm()">+ Add loan</button>
+        <div style="display:grid;grid-template-columns:1fr;gap:14px">`;
+      data.loans.forEach(loan=>{
+        const pos=loanPosition(loan); const owed=pos.owed;
+        const remTxt=owed>0?money(owed)+' to pay':owed<0?'Credit '+money(-owed):'Cleared';
+        const dueTxt=loanDueList(loan).map(d=>money(d.amount)+' on '+ordinal(d.day)).join(' · ')||'No due dates set';
+        html+=`<div class="card" style="border-left:6px solid var(--accent);padding:16px">
+          <div class="row"><h3 style="font-size:18px;color:var(--ink)">${esc(loan.name)}</h3><div class="spacer"></div>
+            <span class="pill ${owed>0?'warn':'good'}" style="font-size:13px;padding:4px 10px">${remTxt}</span></div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0 6px">
-            <div style="background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 11px">
-              <div class="muted" style="font-size:11px">Still owed</div>
-              <div style="font-weight:800;font-variant-numeric:tabular-nums;color:${owed>0?'var(--warn)':'var(--good)'}">${money(Math.max(0,owed))}</div></div>
-            <div style="background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 11px">
-              <div class="muted" style="font-size:11px">Paid so far</div>
-              <div style="font-weight:800;font-variant-numeric:tabular-nums;color:var(--good)">${money(a.paid)}</div></div>
+            <div style="background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 11px"><div class="muted" style="font-size:11px">Still owed</div><div style="font-weight:800;color:${owed>0?'var(--warn)':'var(--good)'}">${money(Math.max(0,owed))}</div></div>
+            <div style="background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 11px"><div class="muted" style="font-size:11px">Paid so far</div><div style="font-weight:800;color:var(--good)">${money(pos.paid)}</div></div>
           </div>
-          <p class="muted" style="font-size:12px; margin:4px 0 12px 0;">Installment: <b>${money(loan.installment)}/mo</b> ${loan.notes ? `· ${esc(loan.notes)}` : ''}</p>
-          <div class="row" style="gap:10px;">
-            <button class="btn tiny" style="padding:8px 14px; border-radius:10px;" onclick="App.openLoanLedger('${loan.id}')">📋 Planning ledger</button>
+          <p class="muted" style="font-size:12px;margin:4px 0 12px">Due: ${esc(dueTxt)}${loan.notes?` · ${esc(loan.notes)}`:''}</p>
+          <div class="row" style="gap:10px">
+            <button class="btn tiny" style="padding:8px 14px;border-radius:10px" onclick="App.openLoanLedger('${loan.id}')">📋 Planning ledger</button>
             <button class="btn ghost tiny" onclick="App.editLoanSettingsForm('${loan.id}')">⚙︎ Baseline</button>
-            <button class="btn line tiny" style="color:var(--bad); border:none;" onclick="App.delLoan('${loan.id}')">✕ Wipe</button>
-          </div>
-        </div>`;
+            <button class="btn line tiny" style="color:var(--bad);border:none" onclick="App.delLoan('${loan.id}')">✕ Wipe</button>
+          </div></div>`;
       });
-      html += `</div>`;
-      wrap.innerHTML = html;
-      return;
+      html+='</div>'; return html;
     }
-
-    // PAGE B: LEDGER DETAILED WORKSPACE
-    const loan = data.loans.find(l => l.id === activeLoanId);
-    if(!loan) { activeLoanId = null; renderLoans(); return; }
-
-    const rows = data.periods.filter(p=>p.loan_id===loan.id).sort(sortPeriods);
-    const { calc } = computeWaterfall(loan);
-
-    let html = `<div style="margin-bottom:16px;">
-      <button class="btn line tiny" style="background:var(--card); font-weight:700; padding:8px 12px; margin-bottom:12px;" onclick="App.closeLoanLedger()">⬅️ Back to Loans Dashboard</button>
-    </div>
-    <div class="card" style="background:var(--accent-soft); border:1px solid var(--accent); margin-bottom: 16px;">
-      <div class="row">
-        <h3 style="font-size:20px; color:var(--ink)">${esc(loan.name)} Spreadsheet</h3>
-        <div class="spacer"></div>
-        <b style="font-size:15px; color:var(--ink)">Base Debt: ${money(loan.balance)}</b>
+    const loan=data.loans.find(l=>l.id===activeLoanId);
+    if(!loan){ activeLoanId=null; return loansContentHTML(); }
+    const dues=loanDueList(loan); const pos=loanPosition(loan);
+    let html=`<button class="btn line tiny" style="margin-bottom:12px" onclick="App.closeLoanLedger()">‹ Back to loans</button>
+      <div class="card" style="background:var(--accent-soft);border:1px solid var(--accent);margin-bottom:14px">
+        <div class="row"><h3 style="font-size:19px;color:var(--ink)">${esc(loan.name)}</h3><div class="spacer"></div>
+          <b>${pos.owed>0?money(pos.owed)+' left':pos.owed<0?'Credit '+money(-pos.owed):'Cleared'}</b></div>
+        <div class="muted" style="font-size:12px;margin-top:4px">Starting balance ${money(loan.balance)} · Paid so far ${money(pos.paid)}</div>
       </div>
-      <div class="muted" style="font-size:12px; margin-top:4px;">
-        Default Monthly Target Accrual: <b>${money(loan.installment)}</b> ${loan.notes ? `· ${esc(loan.notes)}` : ''}
-      </div>
-    </div>`;
-
-    const HP = S.hiddenPeriods||{};
-    const hiddenCount = calc.filter(c=>HP[c.p.id]).length;
-    if(hiddenCount){ html+=`<button class="btn line tiny" style="margin-top:12px" onclick="App.toggleLedgerHidden()">${ledgerShowHidden?'🙈 Hide':'👁 Show'} ${hiddenCount} hidden paid window${hiddenCount>1?'s':''}</button>`; }
-
-    calc.forEach((c, index) => {
-      const p = c.p;
-      const isHidden = !!HP[p.id];
-      if(isHidden && !ledgerShowHidden) return;
-      const startingBalanceThisPeriod = c.startBal;
-      const addedInstallment = c.accrual;
-      const totalStackedDue = c.totalDue;
-      const effectivePayment = c.payment;
-      const projectedBalanceAfter = c.after;            // negative = credit carried forward
-      const isCredit = projectedBalanceAfter < 0;
-      const startIsCredit = startingBalanceThisPeriod < 0;
-      const payDefault = Math.max(0, totalStackedDue);
-
-      const overdue = p.status !== 'paid' && p.due_date && p.due_date < todayStr();
-      const cls = p.status === 'paid' ? 'good' : effectivePayment > 0 ? 'warn' : 'gray';
-      const lbl = p.status === 'paid' ? 'Paid' : effectivePayment > 0 ? 'Simulated Plan' : 'Unplanned';
-
-      html+=`<div style="border:1px solid var(--line); border-radius:12px; padding:14px; margin-top:12px; background:var(--card);${isHidden?'opacity:.55':''}">
-        <div class="row">
-          <b style="font-size:14px">${monthShort(p.month)} · ${PERIOD_LABEL(p.period)}</b>
-          <span class="pill ${cls}" style="margin-left:8px">${lbl}</span>
-          ${isHidden?'<span class="pill gray" style="margin-left:6px">Hidden</span>':''}
-          <div class="spacer"></div>
-          <span class="muted" style="font-size:12px">Due Target: ${fmtDay(p.due_date)}</span>
-        </div>
-        
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px 24px; margin-top:12px; font-size:13px; border-top:1px dashed var(--line); padding-top:12px;">
-          <div class="row"><span class="muted">Starting Balance:</span><div class="spacer"></div><span style="color:${startIsCredit?'var(--good)':'inherit'}">${startIsCredit?('Credit '+money(-startingBalanceThisPeriod)):money(startingBalanceThisPeriod)}</span></div>
-          ${addedInstallment > 0
-            ? `<div class="row"><span class="muted">Amortization (30th):</span><div class="spacer"></div><span style="color:var(--warn)">+ ${money(addedInstallment)}</span></div>`
-            : `<div class="row"><span class="muted">Amortization:</span><div class="spacer"></div><span class="muted" style="font-size:12px">— 30th only</span></div>`}
-          <div class="row" style="grid-column: 1 / -1; background:var(--bg); padding:6px 10px; border-radius:8px; border:1px solid var(--line)">
-            <span class="muted"><b>Total Due This Window:</b></span><div class="spacer"></div><b>${money(Math.max(0, totalStackedDue))}</b>
-          </div>
-          <div class="row"><span class="muted">Your Plan Allocation:</span><div class="spacer"></div><b style="color:var(--accent)">${money(p.planned_payment)}</b></div>
-          <div class="row"><span class="muted">Actual Paid:</span><div class="spacer"></div><b style="color:var(--good)">${money(p.paid_amount)}</b></div>
-        </div>
-
-        <div class="row" style="margin-top:14px; background:var(--bg); padding:8px 12px; border-radius:8px; border:1px solid var(--line)">
-          <span class="muted"><b>${isCredit ? 'Credit Carried Forward:' : 'Projected Balance After:'}</b></span>
-          <div class="spacer"></div>
-          <b style="font-size:15px; color:${isCredit ? 'var(--good)' : projectedBalanceAfter > 0 ? 'var(--warn)' : 'var(--good)'}">${isCredit ? money(-projectedBalanceAfter) : money(projectedBalanceAfter)}</b>
-        </div>
-        ${isCredit ? `<div class="muted" style="font-size:12px; margin-top:6px; color:var(--good)">↪ Overpayment of ${money(-projectedBalanceAfter)} rolls into the next pay window.</div>` : ''}
-
-        <div class="row" style="gap:6px; margin-top:12px; flex-wrap:wrap">
-          ${p.status !== 'paid'
-            ? `<button class="btn ghost tiny" onclick="App.planForm('${p.id}')">✏️ Set/Edit Plan</button>
-               <button class="btn tiny" onclick="App.payForm('${p.id}', ${payDefault})">✅ Log Payment</button>`
-            : `<button class="btn line tiny" onclick="App.unpayPeriod('${p.id}')">↩️ Undo Payment</button>
-               <button class="btn line tiny" onclick="App.toggleHidePeriod('${p.id}')">${isHidden?'👁 Unhide':'🙈 Hide'}</button>`}
-          <button class="btn line tiny" onclick="App.remindLoan('${p.id}')">🔔 Remind</button>
-          ${index === calc.length - 1 ? `<button class="btn line tiny" onclick="App.extendNextPeriod('${loan.id}', '${p.month}', '${p.period}')">➕ Map Next Period</button>` : ''}
-          <button class="btn line tiny" style="color:var(--bad)" onclick="App.delPeriod('${p.id}')">✕ Remove Window</button>
-        </div>
-      </div>`;
-    });
-    wrap.innerHTML = html;
+      <div class="group-title">Due dates <span class="count">${dues.length}/3</span></div><div class="card">`;
+    if(!dues.length) html+=`<p class="muted" style="font-size:13px">No due dates yet — add when a charge lands and how much.</p>`;
+    else dues.forEach((d,i)=>{ html+=`<div class="exp"><span class="nm">${ordinal(d.day)} of the month</span><span class="amt">${money(d.amount)}</span>
+        <button class="icon-btn" onclick="App.dueForm('${loan.id}',${i})">✏️</button>
+        <button class="icon-btn del" onclick="App.removeDue('${loan.id}',${i})">✕</button></div>`; });
+    if(dues.length<3) html+=`<button class="btn ghost tiny" style="margin-top:10px" onclick="App.dueForm('${loan.id}',null)">+ Add due date</button>`;
+    html+=`</div>
+      <div class="group-title" style="margin-top:18px">Ledger <button class="btn ghost tiny" style="margin-left:auto" onclick="App.payForm('${loan.id}')">+ Log payment</button></div>
+      <div class="card"><div class="exp"><span class="nm muted">Starting balance</span><span class="amt">${money(loan.balance)}</span></div>`;
+    const ev=loanLedgerEvents(loan);
+    if(!ev.length) html+=`<p class="muted" style="font-size:13px;padding:6px 2px">No charges or payments yet this month.</p>`;
+    ev.forEach(e=>{ const isPay=e.type==='pay';
+      html+=`<div class="exp"><span class="nm">${fmtDay(e.date)} · ${isPay?'💸 Payment':'📌 Due'}${e.note?' · '+esc(e.note):''}</span>
+        <span class="amt" style="color:${isPay?'var(--good)':'var(--warn)'}">${isPay?'−':'+'}${money(e.amount)}</span>
+        <span class="muted" style="font-size:12px;min-width:64px;text-align:right">${money(e.bal)}</span>
+        ${isPay?`<button class="icon-btn del" onclick="App.removePayment('${loan.id}','${e.id}')">✕</button>`:''}</div>`; });
+    html+=`</div>
+      <div class="summary" style="margin-top:12px"><div class="stat big ${pos.owed>0?'bad':'good'}"><div class="k">${pos.owed>=0?'Still to pay':'Credit ahead'}</div><div class="v">${money(Math.abs(pos.owed))}</div></div></div>`;
+    return html;
   }
+  function renderLoans(){ const el=$('#loanBody'); if(el) el.innerHTML=loansContentHTML(); }
 
-  /* ----- Router Toggles ----- */
-  function openLoanLedger(id) { activeLoanId = id; ledgerShowHidden=false; renderLoans(); window.scrollTo(0,0); }
-  function closeLoanLedger() { activeLoanId = null; renderLoans(); window.scrollTo(0,0); }
-  async function toggleHidePeriod(id){ const h={...(S.hiddenPeriods||{})}; if(h[id])delete h[id]; else h[id]=true; S.hiddenPeriods=h; await saveSettings(); renderLoans(); }
-  function toggleLedgerHidden(){ ledgerShowHidden=!ledgerShowHidden; renderLoans(); }
-
-  /* ----- Debt payoff planner (credit healing) ----- */
-  function openPayoff(){ payoffView=true; renderLoans(); window.scrollTo(0,0); }
-  function closePayoff(){ payoffView=false; renderLoans(); window.scrollTo(0,0); }
-  function loanIsOverdue(loan){
-    if(S.loanOverdue && S.loanOverdue[loan.id]) return true;             // manually flagged
-    // auto: any unpaid pay-period window already past its due date
-    return data.periods.some(p=>p.loan_id===loan.id && p.status!=='paid' && p.due_date && p.due_date < todayStr());
-  }
-  function loanRemaining(loan){
-    const fb = computeWaterfall(loan).finalBalance;
-    return fb>0 ? fb : Number(loan.balance||0);   // fall back to base balance if no ledger windows yet
-  }
-  // Recommended order: past-due first, then highest interest, then largest balance
-  function payoffRanked(){
-    return data.loans.slice().map(l=>({
-      loan:l, overdue:loanIsOverdue(l),
-      apr:Number((S.loanApr&&S.loanApr[l.id])||0),
-      bal:loanRemaining(l), min:Number(l.installment||0)
-    })).sort((a,b)=>{
-      if(a.overdue!==b.overdue) return a.overdue?-1:1;
-      if(a.apr!==b.apr) return b.apr-a.apr;
-      return b.bal-a.bal;
-    });
-  }
-  async function setDebtMonthly(v){ S.debtMonthly=parseFloat(v)||0; await saveSettings(); renderPayoff(); }
-  async function setApr(id,v){ S.loanApr={...(S.loanApr||{}), [id]:parseFloat(v)||0}; await saveSettings(); renderPayoff(); }
-  async function toggleOverdue(id){ const o={...(S.loanOverdue||{})}; o[id]=!o[id]; S.loanOverdue=o; await saveSettings(); renderPayoff(); }
-
-  function renderPayoff(){
-    const wrap=$('#loanBody');
-    const ranked=payoffRanked();
-    const totalMin=ranked.reduce((s,r)=>s+r.min,0);
-    const totalBal=ranked.reduce((s,r)=>s+r.bal,0);
-    const budget=Number(S.debtMonthly||0);
-    const surplus=budget-totalMin;
-    const focus=ranked[0];
-
-    let html=`<button class="btn line tiny" style="margin-bottom:12px" onclick="App.closePayoff()">‹ Back to loans</button>
-      <div class="panel-head" style="margin-bottom:8px"><h2 style="font-size:20px">📋 Payoff Plan</h2></div>
-      <div class="card" style="background:var(--accent-soft);border:1px solid var(--accent)">
-        <b>Essentials first.</b>
-        <p class="muted" style="font-size:13px;margin-top:4px">Rent, bills and food always come before debt. Enter only what's genuinely left over after those — that's what we'll put to work.</p>
-      </div>
-      <div class="card">
-        <div class="field" style="margin-bottom:6px"><label>Money I can put toward debt each month (₱)</label>
-          <input type="number" inputmode="decimal" value="${budget||''}" placeholder="0" onchange="App.setDebtMonthly(this.value)" /></div>
-        <div class="summary">
-          <div class="stat"><div class="k">Total owed</div><div class="v">${money(totalBal)}</div></div>
-          <div class="stat"><div class="k">Minimums / mo</div><div class="v">${money(totalMin)}</div></div>
-        </div>`;
-    if(budget<=0){
-      html+=`<p class="muted" style="font-size:13px;margin-top:12px">Enter your monthly amount above to see your plan.</p></div>`;
-    } else if(surplus<0){
-      html+=`<div class="stat bad big" style="margin-top:10px"><div class="k">Short of minimums by</div><div class="v">${money(-surplus)}</div></div>
-        <p class="muted" style="font-size:13px;margin-top:10px">Right now the plan can't cover every minimum. That's important information, not a failure. Focus on essentials, cover the past-due accounts first, and it's worth contacting those lenders about a lower or restructured payment — many will work with you.</p></div>`;
-    } else {
-      const focusPay=focus.min+surplus;
-      const months=focusPay>0?Math.ceil(focus.bal/focusPay):0;
-      html+=`<div class="stat good big" style="margin-top:10px"><div class="k">Spare after minimums (your firepower)</div><div class="v">${money(surplus)}</div></div>
-        <div style="margin-top:12px;padding:12px;border:1px solid var(--accent);border-radius:12px;background:var(--card)">
-          <div class="row"><b>🎯 Attack first: ${esc(focus.loan.name)}</b>${focus.overdue?'<span class="pill bad" style="margin-left:8px">Past due</span>':''}</div>
-          <p class="muted" style="font-size:13px;margin-top:6px">Pay its minimum ${money(focus.min)} <b>plus your ${money(surplus)} spare = ${money(focusPay)}/mo</b>. At that rate it clears in about <b>${months} month${months===1?'':'s'}</b> (rough estimate). Keep paying just the minimum on the others so nothing else falls behind.</p>
-        </div></div>`;
-    }
-
-    // Ordered list with reasoning + per-loan APR / past-due controls
-    html+=`<div class="group-title" style="margin-top:18px">Your order of attack</div><div class="card">`;
-    ranked.forEach((r,i)=>{
-      const why = r.overdue ? 'past due — stops credit damage first'
-                : r.apr>0 ? `${r.apr}% interest`
-                : 'largest balance';
-      html+=`<div style="padding:10px 2px;border-bottom:1px solid var(--line)">
-        <div class="row"><b>${i+1}. ${esc(r.loan.name)}</b>${r.overdue?'<span class="pill bad" style="margin-left:6px">Past due</span>':''}
-          <div class="spacer"></div><b>${money(r.bal)}</b></div>
-        <div class="muted" style="font-size:12px;margin:2px 0 8px">Priority reason: ${why} · min ${money(r.min)}/mo</div>
-        <div class="row" style="gap:8px">
-          <label style="font-size:12px;color:var(--muted)">Interest %<input type="number" inputmode="decimal" value="${r.apr||''}" placeholder="—" onchange="App.setApr('${r.loan.id}',this.value)" style="width:70px;margin-left:6px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg)" /></label>
-          <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:5px"><input type="checkbox" ${r.overdue?'checked':''} onchange="App.toggleOverdue('${r.loan.id}')" style="width:auto" /> Past due</label>
-        </div>
-      </div>`;
-    });
-    html+=`</div><p class="muted" style="font-size:12px;margin-top:10px">Add each loan's interest % for the most accurate order. Payoff times are rough estimates that ignore future interest — real dates depend on your lender.</p>`;
-    wrap.innerHTML=html;
-  }
-
-  async function syncLoanToBudget(p, loan){
-    const amount = p.status==='paid' ? (Number(p.paid_amount)||Number(p.planned_payment)||0) : (Number(p.planned_payment)||0);
-    const existing = data.expenses.find(e=>e.source==='loan'&&e.source_id===p.id);
-    if(amount<=0){ if(existing) await del('budget_expenses',existing.id,data.expenses); return; }
-    const patch={ month:p.month, period:p.period, category:'Loans', name:loan.name, amount,
-      status:p.status==='paid'?'paid':'planned', paid_date:p.status==='paid'?todayStr():null,
-      source:'loan', source_id:p.id, is_recurring:false };
-    if(existing) await upd('budget_expenses',existing.id,patch,data.expenses);
-    else await ins('budget_expenses',patch,data.expenses);
-  }
+  function openLoanLedger(id){ activeLoanId=id; renderBudget(); window.scrollTo(0,0); }
+  function closeLoanLedger(){ activeLoanId=null; renderBudget(); window.scrollTo(0,0); }
 
   function loanForm(){
-    const m=new Date().toISOString().slice(0,7);
-    openSheet(`<h3>New Loan / Vehicle Amortization</h3>
-      <div class="field"><label>Name</label><input id="f_name" placeholder="e.g. Montero / Livina Amortization" /></div>
-      <div class="field two"><div><label>Current Overdue / Base Balance</label><input id="f_bal" type="number" inputmode="decimal" placeholder="0" /></div>
-      <div><label>Default Fixed Installment / Month</label><input id="f_pay" type="number" inputmode="decimal" placeholder="0" /></div></div>
-      <div class="field two"><div><label>Start Month</label><input id="f_month" type="month" value="${m}" /></div>
-      <div><label>Start Pay Window</label><select id="f_per"><option value="mid">15th window</option><option value="end">30th window</option></select></div></div>
-      <div class="field"><label>Notes</label><input id="f_notes" placeholder="e.g. Bank financing, due every 21st" /></div>
+    openSheet(`<h3>New loan / debt</h3>
+      <div class="field"><label>Name</label><input id="l_name" placeholder="e.g. Livina, Paluwagan phone" /></div>
+      <div class="field"><label>Current balance owed now (₱)</label><input id="l_bal" type="number" inputmode="decimal" placeholder="0" /></div>
+      <div class="field two"><div><label>First due day (1-31)</label><input id="l_day" type="number" inputmode="numeric" placeholder="e.g. 27" /></div>
+        <div><label>Due amount (₱)</label><input id="l_amt" type="number" inputmode="decimal" placeholder="0" /></div></div>
+      <p class="muted" style="font-size:12px">You can add up to 3 due dates per loan later in its ledger.</p>
+      <div class="field"><label>Notes</label><input id="l_notes" placeholder="optional" /></div>
       <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.addLoan()">Add</button></div>`);
-    setTimeout(()=>$('#f_name').focus(),100);
+    setTimeout(()=>$('#l_name').focus(),100);
   }
-
   async function addLoan(){
-    const name=$('#f_name').value.trim(); if(!name){toast('Name needed');return;}
-    const bal=parseFloat($('#f_bal').value)||0, pay=parseFloat($('#f_pay').value)||0;
-    const m=$('#f_month').value||new Date().toISOString().slice(0,7), per=$('#f_per').value;
-    const loan=await ins('loans',{name,balance:bal,installment:pay,notes:$('#f_notes').value.trim()},data.loans);
+    const name=$('#l_name').value.trim(); if(!name){toast('Name needed');return;}
+    const bal=parseFloat($('#l_bal').value)||0;
+    const day=parseInt($('#l_day').value)||0, amt=parseFloat($('#l_amt').value)||0;
+    const loan=await ins('loans',{name,balance:bal,installment:0,notes:$('#l_notes').value.trim()},data.loans);
     if(!loan)return;
-    const lp=await ins('loan_periods',{loan_id:loan.id,month:m,period:per,due_date:periodDueDate(m,per),
-      due_amount:bal,planned_payment:0,paid_amount:0,status:'planned',balance_after:bal},data.periods);
-    if(lp) await syncLoanToBudget(lp,loan);
-    closeSheet(); renderLoans();
+    if(day>=1 && day<=31){ S.loanDues={...(S.loanDues||{})}; S.loanDues[loan.id]=[{day, amount:amt}]; await saveSettings(); }
+    closeSheet(); renderBudget();
   }
-
-  function planForm(id){
-    const p=data.periods.find(x=>x.id===id);
-    openSheet(`<h3>Simulate Planned Payment</h3>
-      <p class="muted" style="font-size:13px">Type what you intend to pay during this cycle. The waterfall down below will adjust calculations automatically.</p>
-      <div class="field"><label>Planned Payment Allocation (₱)</label><input id="f_plan" type="number" inputmode="decimal" value="${p.planned_payment||''}" placeholder="0" /></div>
-      <div class="field"><label>Target Payment Date</label><input id="f_date" type="date" value="${p.due_date||''}" /></div>
-      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.savePlan('${id}')">Save & Update Waterfall</button></div>`);
+  function dueForm(loanId, idx){
+    const list=(S.loanDues&&S.loanDues[loanId])||[]; const d=idx!=null?list[idx]:null;
+    openSheet(`<h3>${d?'Edit':'Add'} due date</h3>
+      <div class="field two"><div><label>Day of month (1-31)</label><input id="d_day" type="number" inputmode="numeric" value="${d?d.day:''}" placeholder="e.g. 15" /></div>
+        <div><label>Amount (₱)</label><input id="d_amt" type="number" inputmode="decimal" value="${d?d.amount:''}" placeholder="0" /></div></div>
+      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.saveDue('${loanId}',${idx==null?'null':idx})">Save</button></div>`);
+    setTimeout(()=>$('#d_day').focus(),100);
   }
-
-  async function savePlan(id){
-    const p=data.periods.find(x=>x.id===id), loan=data.loans.find(l=>l.id===p.loan_id);
-    const plan=parseFloat($('#f_plan').value)||0, dd=$('#f_date').value||p.due_date;
-    await upd('loan_periods',id,{planned_payment:plan,due_date:dd},data.periods);
-    await syncLoanToBudget(data.periods.find(x=>x.id===id),loan);
-    closeSheet(); renderLoans();
+  async function saveDue(loanId, idx){
+    const day=parseInt($('#d_day').value)||0, amt=parseFloat($('#d_amt').value)||0;
+    if(day<1||day>31){toast('Enter a day 1-31');return;}
+    S.loanDues={...(S.loanDues||{})}; const list=[...(S.loanDues[loanId]||[])];
+    if(idx==null){ if(list.length>=3){toast('Max 3 due dates');return;} list.push({day,amount:amt}); }
+    else list[idx]={day,amount:amt};
+    S.loanDues[loanId]=list; await saveSettings(); closeSheet(); renderBudget();
   }
-
-  function payForm(id, computedDue){
-    const p=data.periods.find(x=>x.id===id);
-    openSheet(`<h3>Record Actual Payment</h3>
-      <p class="muted" style="font-size:13px">Locking this payment will adjust the true underlying base balance of the loan asset.</p>
-      <div class="field"><label>Amount Paid (₱)</label><input id="f_paid" type="number" inputmode="decimal" value="${p.planned_payment||computedDue||''}" /></div>
-      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.confirmPay('${id}')">Lock & Mark Paid</button></div>`);
+  async function removeDue(loanId, idx){
+    S.loanDues={...(S.loanDues||{})}; const list=[...(S.loanDues[loanId]||[])]; list.splice(idx,1); S.loanDues[loanId]=list; await saveSettings(); renderBudget();
   }
-
-  async function confirmPay(id){
-    const p=data.periods.find(x=>x.id===id), loan=data.loans.find(l=>l.id===p.loan_id);
-    const paid=parseFloat($('#f_paid').value)||0;
-
-    // Base balance stays fixed; the waterfall derives the running balance and carries any overpayment forward.
-    await upd('loan_periods',id,{paid_amount:paid,status:'paid'},data.periods);
-    await syncLoanToBudget(data.periods.find(x=>x.id===id),loan);
-
-    closeSheet(); renderLoans();
-    const fb = computeWaterfall(loan).finalBalance;
-    toast(fb > 0 ? 'Payment locked — waterfall recalculated!' : fb < 0 ? 'Paid ahead — '+money(-fb)+' credit carried forward! 🎉' : 'Loan completely cleared! 🎉');
+  function payForm(loanId){
+    openSheet(`<h3>Log payment</h3>
+      <div class="field two"><div><label>Date</label><input id="p_date" type="date" value="${todayStr()}" /></div>
+        <div><label>Amount (₱)</label><input id="p_amt" type="number" inputmode="decimal" placeholder="0" /></div></div>
+      <div class="field"><label>Note (optional)</label><input id="p_note" placeholder="e.g. 15th payday" /></div>
+      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.savePayment('${loanId}')">Save</button></div>`);
   }
-
-  async function unpayPeriod(id){
-    const p=data.periods.find(x=>x.id===id), loan=data.loans.find(l=>l.id===p.loan_id);
-    await upd('loan_periods',id,{paid_amount:0,status:'planned'},data.periods);
-    await syncLoanToBudget(data.periods.find(x=>x.id===id),loan);
-    renderLoans();
+  async function savePayment(loanId){
+    const amt=parseFloat($('#p_amt').value)||0; if(amt<=0){toast('Enter an amount');return;}
+    const date=$('#p_date').value||todayStr();
+    S.loanPayments={...(S.loanPayments||{})}; const list=[...(S.loanPayments[loanId]||[])];
+    list.push({id:String(Date.now()), date, amount:amt, note:$('#p_note').value.trim()});
+    S.loanPayments[loanId]=list; await saveSettings(); closeSheet(); renderBudget(); toast('Payment logged');
   }
-
-  async function extendNextPeriod(loanId, currentMonth, currentPeriod){
-    const np = nextPeriod(currentMonth, currentPeriod);
-    const exists = data.periods.some(x=>x.loan_id===loanId && x.month===np.month && x.period===np.period);
-    if(exists){ toast('Next period already mapped out below!'); return; }
-    
-    const nlp = await ins('loan_periods',{
-      loan_id: loanId, month: np.month, period: np.period,
-      due_date: periodDueDate(np.month, np.period), due_amount: 0,
-      planned_payment: 0, paid_amount: 0, status: 'planned', balance_after: 0
-    }, data.periods);
-    
-    if(nlp) {
-      const loan = data.loans.find(l=>l.id===loanId);
-      await syncLoanToBudget(nlp, loan);
-    }
-    renderLoans();
-    toast('Next future window generated!');
+  async function removePayment(loanId, payId){
+    S.loanPayments={...(S.loanPayments||{})}; S.loanPayments[loanId]=(S.loanPayments[loanId]||[]).filter(p=>String(p.id)!==String(payId)); await saveSettings(); renderBudget();
   }
-
-  function remindLoan(id){
-    const p=data.periods.find(x=>x.id===id), loan=data.loans.find(l=>l.id===p.loan_id);
-    downloadICS(loan.name+' Payment Due', p.due_date, '09:00', 'Simulated Plan Target: '+money(p.planned_payment));
-  }
- 
-  /* ----- Safe Structural Modification Methods ----- */
   function editLoanSettingsForm(loanId){
-    const loan = data.loans.find(l=>l.id===loanId);
-    openSheet(`<h3>Edit Loan / Vehicle Baseline</h3>
+    const loan=data.loans.find(l=>l.id===loanId);
+    openSheet(`<h3>Edit loan baseline</h3>
       <div class="field"><label>Name</label><input id="e_loan_name" value="${esc(loan.name)}" /></div>
-      <div class="field two">
-        <div><label>Current Base Balance (₱)</label><input id="e_loan_bal" type="number" inputmode="decimal" value="${loan.balance}" /></div>
-        <div><label>Fixed Monthly Installment (₱)</label><input id="e_loan_pay" type="number" inputmode="decimal" value="${loan.installment}" /></div>
-      </div>
-      <div class="field"><label>Notes</label><input id="e_loan_notes" value="${esc(loan.notes)}" /></div>
-      <div class="sheet-acts">
-        <button class="btn line" onclick="App.closeSheet()">Cancel</button>
-        <button class="btn" onclick="App.saveLoanSettings('${loanId}')">Save Changes</button>
-      </div>`);
+      <div class="field"><label>Current balance owed (₱)</label><input id="e_loan_bal" type="number" inputmode="decimal" value="${loan.balance}" /></div>
+      <div class="field"><label>Notes</label><input id="e_loan_notes" value="${esc(loan.notes||'')}" /></div>
+      <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.saveLoanSettings('${loanId}')">Save</button></div>`);
   }
-
   async function saveLoanSettings(loanId){
-    const name = $('#e_loan_name').value.trim(); if(!name){toast('Name needed');return;}
-    const bal = parseFloat($('#e_loan_bal').value)||0;
-    const pay = parseFloat($('#e_loan_pay').value)||0;
-    const notes = $('#e_loan_notes').value.trim();
-
-    await upd('loans', loanId, { name, balance: bal, installment: pay, notes }, data.loans);
-    closeSheet();
-    renderLoans();
-    toast('Loan baseline modified! 🎉');
+    const name=$('#e_loan_name').value.trim(); if(!name){toast('Name needed');return;}
+    await upd('loans', loanId, {name, balance:parseFloat($('#e_loan_bal').value)||0, notes:$('#e_loan_notes').value.trim()}, data.loans);
+    closeSheet(); renderBudget(); toast('Saved');
   }
-  
-  async function delPeriod(id){
-    const ex=data.expenses.find(e=>e.source==='loan'&&e.source_id===id);
-    if(ex) await del('budget_expenses',ex.id,data.expenses);
-    await del('loan_periods',id,data.periods); renderLoans();
-  }
-
   async function delLoan(id){
-    if(!confirm('Are you absolutely sure you want to completely delete this loan asset and its calculation windows?')) return;
-    $('#syncState').textContent='Deleting…';
-    try {
-      data.expenses = data.expenses.filter(e => !(e.source === 'loan' && data.periods.filter(p=>p.loan_id===id).map(x=>x.id).includes(e.source_id)));
-      await sb.from('loan_periods').delete().eq('loan_id', id);
+    if(!confirm('Delete this loan and its dues/payments?'))return;
+    try{
       await sb.from('loans').delete().eq('id', id);
-      data.periods = data.periods.filter(p => p.loan_id !== id);
-      data.loans = data.loans.filter(l => l.id !== id);
-      $('#syncState').textContent='Synced ✓';
-      renderLoans();
-      toast('Loan wiped successfully!');
-    } catch (err) {
-      console.error(err);
-      toast('Delete failed — check connection');
-    }
+      data.loans=data.loans.filter(l=>l.id!==id);
+      if(S.loanDues) delete S.loanDues[id];
+      if(S.loanPayments) delete S.loanPayments[id];
+      await saveSettings(); renderBudget(); toast('Loan removed');
+    }catch(e){ console.error(e); toast('Delete failed'); }
   }
 
   /* ----- Settings ----- */
@@ -1759,7 +1517,7 @@ const App = (() => {
     html += acc('home','Add to Home Screen','',`<p class="muted" style="font-size:13px">In Safari: tap <b>Share</b> → <b>Add to Home Screen</b>. LifeHub then opens full-screen like an app.</p>`);
     html += acc('account','Account','',`<p class="muted" style="font-size:13px;margin-bottom:4px">Signed in as <b style="color:var(--ink)">${esc(authEmail||'')}</b></p>
       <p class="muted" style="font-size:11px;word-break:break-all;margin-bottom:4px">Account ID: ${esc(uid||'')}</p>
-      <p class="muted" style="font-size:11px;margin-bottom:12px">Build <b style="color:var(--accent)">v7</b></p>
+      <p class="muted" style="font-size:11px;margin-bottom:12px">Build <b style="color:var(--accent)">v9</b> · loans in budget</p>
       <button class="btn line" style="width:100%;justify-content:center" onclick="App.doLogout()">Log out</button>`);
     $('#settingsBody').innerHTML=html;
   }
@@ -1801,9 +1559,13 @@ const App = (() => {
 
   /* ----- FAB router ----- */
   function fab(){
-    if(tab==='budget'&&recurringView){ recurringForm(); return; }
     if(tab==='shopping'&&shopSubtab==='prices'){ addProductRow(); return; }
-    ({shopping:shopForm,budget:expenseForm,loans:loanForm,notes:()=>noteForm(),calendar:()=>noteForm(calSel||todayStr())}[tab]||(()=>{}))();
+    if(tab==='budget'){
+      if(budgetTab==='recurring'){ recurringForm(); return; }
+      if(budgetTab==='loans'){ loanForm(); return; }
+      expenseForm(); return;
+    }
+    ({shopping:shopForm,notes:()=>noteForm(),calendar:()=>noteForm(calSel||todayStr())}[tab]||(()=>{}))();
   }
 
   /* ----- init ----- */
@@ -1823,12 +1585,9 @@ const App = (() => {
     expenseForm, addExp, toggleExp, delExp, editExpenseForm, saveExpenseEdit,
     noteForm, editNoteForm, saveNote, delNote,
     calShift, calPick,
-    loanForm, addLoan, delLoan, planForm, savePlan, payForm, confirmPay, unpayPeriod, delPeriod, remindLoan,
-    extendNextPeriod,
-    editLoanSettingsForm, saveLoanSettings,
-    openLoanLedger, closeLoanLedger,
-    openPayoff, closePayoff, setDebtMonthly, setApr, toggleOverdue,
-    setOpt, setTheme, toggleSettings, goPayoff, openBudgetPeriod, closeBudgetPeriod, toggleHidePeriod, toggleLedgerHidden, addCat, removeCat, delRecurring };
+    loanForm, addLoan, delLoan, editLoanSettingsForm, saveLoanSettings,
+    openLoanLedger, closeLoanLedger, dueForm, saveDue, removeDue, payForm, savePayment, removePayment,
+    setOpt, setTheme, toggleSettings, setBudgetTab, setPayPeriodAmount, addCat, removeCat, delRecurring };
 })();
 document.addEventListener('DOMContentLoaded', App.init);
 </script>
