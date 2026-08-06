@@ -305,7 +305,7 @@ const App = (() => {
     theme:'plain',
     accent:'#7c746a', bg:'#faf7f2', font:'Manrope', currency:'₱',
     payMid:15, payEnd:30, savingsPct:20,
-    debtMonthly:0, loanApr:{}, loanOverdue:{}, loanDues:{}, loanPayments:{},
+    debtMonthly:0, loanApr:{}, loanOverdue:{}, loanDues:{}, loanPayments:{}, loanHorizon:6,
     stores:[], priceBook:{}, groceryLimit:0, shopStore:'', hiddenPeriods:{},
     cat_shopping:['Groceries','House things','Personal care','Pharmacy','Other'],
     cat_budget:['Bills','Food','Transport','Subscriptions','Health','Misc']
@@ -627,6 +627,7 @@ const App = (() => {
       });
 
       await autoLogRecurring();
+      try{ await reconcileLoanBudget(); }catch(e){ console.warn('loan-budget reconcile', e); }
       $('#syncState').textContent='Synced ✓';
       renderAll();
     }catch(e){
@@ -989,7 +990,7 @@ const App = (() => {
     const idx=list.findIndex(p=>p.date===dateStr && p.src==='payday');
     if(amt>0){ if(idx>=0) list[idx]={...list[idx],amount:amt}; else list.push({id:'pp'+Date.now(), date:dateStr, amount:amt, src:'payday', note:'Payday'}); }
     else if(idx>=0){ list.splice(idx,1); }
-    S.loanPayments[loanId]=list; await saveSettings(); renderBudget();
+    S.loanPayments[loanId]=list; await saveSettings(); await reconcileLoanBudget(); renderBudget();
   }
 
   /* ----- Recurring charges: compact entry (bottom of Budget) + its own page ----- */
@@ -1306,13 +1307,38 @@ const App = (() => {
     const paid=loanPayList(loan).filter(p=>p.date<=t).reduce((s,p)=>s+(Number(p.amount)||0),0);
     return {owed: Number(loan.balance||0)+dueSum-paid, paid};
   }
+  function addMonths(ym,n){ let [y,m]=ym.split('-').map(Number); m+=n; while(m>12){m-=12;y++;} while(m<1){m+=12;y--;} return y+'-'+String(m).padStart(2,'0'); }
   function loanLedgerEvents(loan){
-    const eom=dueDateStr(todayStr().slice(0,7), 31);
-    const dues=loanDueOccurrences(loan, eom).map(d=>({date:d.date,type:'due',amount:d.amount}));
-    const pays=loanPayList(loan).map(p=>({date:p.date,type:'pay',amount:Number(p.amount)||0,id:p.id,note:p.note}));
-    const ev=dues.concat(pays).sort((a,b)=> a.date<b.date?-1:a.date>b.date?1:(a.type==='due'?-1:1));
+    const horizon=Math.max(0, Number(S.loanHorizon||6));
+    let endYM=addMonths(todayStr().slice(0,7), horizon);
+    const pays=loanPayList(loan);
+    if(pays.length){ const lastPay=pays[pays.length-1].date.slice(0,7); if(lastPay>endYM) endYM=lastPay; }
+    const through=dueDateStr(endYM, 31);
+    const dues=loanDueOccurrences(loan, through).map(d=>({date:d.date,type:'due',amount:d.amount}));
+    const evPays=pays.map(p=>({date:p.date,type:'pay',amount:Number(p.amount)||0,id:p.id,note:p.note}));
+    const ev=dues.concat(evPays).sort((a,b)=> a.date<b.date?-1:a.date>b.date?1:(a.type==='due'?-1:1));
     let bal=Number(loan.balance||0); ev.forEach(e=>{ bal += e.type==='due'?e.amount:-e.amount; e.bal=bal; });
     return ev;
+  }
+  // Mirror every loan payment into the budget tracker as a "Loans" expense in its pay period
+  async function reconcileLoanBudget(){
+    const want={};
+    data.loans.forEach(loan=>{
+      ((S.loanPayments&&S.loanPayments[loan.id])||[]).forEach(p=>{
+        const ym=p.date.slice(0,7); const day=Number(p.date.slice(8,10));
+        const period = day <= (S.payMid||15) ? 'mid' : 'end';
+        want['loan:'+p.id]={month:ym, period, name:loan.name, amount:Number(p.amount)||0};
+      });
+    });
+    const existing=data.expenses.filter(e=>e.source==='loan');
+    const bySrc={}; existing.forEach(e=>bySrc[e.source_id]=e);
+    for(const src in want){
+      const w=want[src], ex=bySrc[src];
+      if(ex){ if(Number(ex.amount)!==w.amount||ex.month!==w.month||ex.period!==w.period||ex.name!==w.name)
+        await upd('budget_expenses',ex.id,{amount:w.amount,month:w.month,period:w.period,name:w.name,category:'Loans'},data.expenses); }
+      else await ins('budget_expenses',{month:w.month,period:w.period,category:'Loans',name:w.name,amount:w.amount,status:'planned',source:'loan',source_id:src,is_recurring:false},data.expenses);
+    }
+    for(const e of existing){ if(!want[e.source_id]) await del('budget_expenses',e.id,data.expenses); }
   }
 
   function loansContentHTML(){
@@ -1429,10 +1455,10 @@ const App = (() => {
     const date=$('#p_date').value||todayStr();
     S.loanPayments={...(S.loanPayments||{})}; const list=[...(S.loanPayments[loanId]||[])];
     list.push({id:String(Date.now()), date, amount:amt, note:$('#p_note').value.trim()});
-    S.loanPayments[loanId]=list; await saveSettings(); closeSheet(); renderBudget(); toast('Payment logged');
+    S.loanPayments[loanId]=list; await saveSettings(); await reconcileLoanBudget(); closeSheet(); renderBudget(); toast('Payment logged');
   }
   async function removePayment(loanId, payId){
-    S.loanPayments={...(S.loanPayments||{})}; S.loanPayments[loanId]=(S.loanPayments[loanId]||[]).filter(p=>String(p.id)!==String(payId)); await saveSettings(); renderBudget();
+    S.loanPayments={...(S.loanPayments||{})}; S.loanPayments[loanId]=(S.loanPayments[loanId]||[]).filter(p=>String(p.id)!==String(payId)); await saveSettings(); await reconcileLoanBudget(); renderBudget();
   }
   function editLoanSettingsForm(loanId){
     const loan=data.loans.find(l=>l.id===loanId);
@@ -1488,7 +1514,8 @@ const App = (() => {
     const budgetContent=`<div class="field two"><div><label>Currency symbol</label><input value="${esc(S.currency)}" onchange="App.setOpt('currency',this.value)" /></div>
       <div><label>Savings target %</label><input type="number" value="${S.savingsPct}" onchange="App.setOpt('savingsPct',+this.value)" /></div></div>
       <div class="field two"><div><label>Mid-month pay day</label><input type="number" value="${S.payMid}" onchange="App.setOpt('payMid',+this.value)" /></div>
-      <div><label>End-month pay day</label><input type="number" value="${S.payEnd}" onchange="App.setOpt('payEnd',+this.value)" /></div></div>`;
+      <div><label>End-month pay day</label><input type="number" value="${S.payEnd}" onchange="App.setOpt('payEnd',+this.value)" /></div></div>
+      <div class="field"><label>Project loan due dates ahead (months)</label><input type="number" value="${S.loanHorizon}" onchange="App.setOpt('loanHorizon',+this.value)" /></div>`;
 
     let html = acc('theme','Theme',THEMES[S.theme||'plain'].label,themeContent);
     html += acc('budget','Budget setup','',budgetContent);
@@ -1517,7 +1544,7 @@ const App = (() => {
     html += acc('home','Add to Home Screen','',`<p class="muted" style="font-size:13px">In Safari: tap <b>Share</b> → <b>Add to Home Screen</b>. LifeHub then opens full-screen like an app.</p>`);
     html += acc('account','Account','',`<p class="muted" style="font-size:13px;margin-bottom:4px">Signed in as <b style="color:var(--ink)">${esc(authEmail||'')}</b></p>
       <p class="muted" style="font-size:11px;word-break:break-all;margin-bottom:4px">Account ID: ${esc(uid||'')}</p>
-      <p class="muted" style="font-size:11px;margin-bottom:12px">Build <b style="color:var(--accent)">v9</b> · loans in budget</p>
+      <p class="muted" style="font-size:11px;margin-bottom:12px">Build <b style="color:var(--accent)">v11</b> · loan-budget sync</p>
       <button class="btn line" style="width:100%;justify-content:center" onclick="App.doLogout()">Log out</button>`);
     $('#settingsBody').innerHTML=html;
   }
