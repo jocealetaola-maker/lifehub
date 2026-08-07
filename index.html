@@ -1339,10 +1339,14 @@ const App = (() => {
   }
   // Mirror every loan payment into the budget tracker as a "Loans" expense in its pay period
   async function reconcileLoanBudget(){
-    // Loan payments now show as live virtual lines in the budget, so remove any
-    // old DB-synced loan expenses to avoid double-counting.
-    const stale=data.expenses.filter(e=>e.source==='loan');
-    for(const e of stale){ await del('budget_expenses',e.id,data.expenses); }
+    // Loan payments show as live virtual lines now; quietly drop any old DB-synced
+    // loan rows to avoid double-counting. Never let this throw a visible error.
+    try{
+      const stale=data.expenses.filter(e=>e && e.source==='loan');
+      for(const e of stale){
+        try{ const {error}=await sb.from('budget_expenses').delete().eq('id',e.id); if(!error){ const i=data.expenses.findIndex(x=>x.id===e.id); if(i>=0) data.expenses.splice(i,1); } }catch(_){}
+      }
+    }catch(_){}
   }
 
   function loansContentHTML(){
@@ -1548,7 +1552,7 @@ const App = (() => {
     html += acc('home','Add to Home Screen','',`<p class="muted" style="font-size:13px">In Safari: tap <b>Share</b> → <b>Add to Home Screen</b>. LifeHub then opens full-screen like an app.</p>`);
     html += acc('account','Account','',`<p class="muted" style="font-size:13px;margin-bottom:4px">Signed in as <b style="color:var(--ink)">${esc(authEmail||'')}</b></p>
       <p class="muted" style="font-size:11px;word-break:break-all;margin-bottom:4px">Account ID: ${esc(uid||'')}</p>
-      <p class="muted" style="font-size:11px;margin-bottom:12px">Build <b style="color:var(--accent)">v12</b> · loans show in planned</p>
+      <p class="muted" style="font-size:11px;margin-bottom:12px">Build <b style="color:var(--accent)">v13</b> · loans in planned</p>
       <button class="btn line" style="width:100%;justify-content:center" onclick="App.doLogout()">Log out</button>`);
     $('#settingsBody').innerHTML=html;
   }
