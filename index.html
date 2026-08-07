@@ -919,11 +919,24 @@ const App = (() => {
   function shiftMonth(d){ const dt=new Date(month+'-01'); dt.setMonth(dt.getMonth()+d); month=dt.toISOString().slice(0,7); autoLogRecurring().then(renderBudget); }
   function periodsActive(){ return [period]; }
 
+  function loanBudgetLines(per){
+    const day15=S.payMid||15; const out=[];
+    data.loans.forEach(loan=>{
+      ((S.loanPayments&&S.loanPayments[loan.id])||[]).forEach(p=>{
+        if(!p.date || p.date.slice(0,7)!==month) return;
+        const d=Number(p.date.slice(8,10)); const pr=d<=day15?'mid':'end';
+        if(pr!==per) return;
+        out.push({id:'loan:'+p.id, category:'Loans', name:loan.name, amount:Number(p.amount)||0, status:'planned', virtual:true});
+      });
+    });
+    return out;
+  }
   function perStats(per){
     const exps=data.expenses.filter(e=>e.month===month && e.period===per);
     const incs=data.incomes.filter(i=>i.month===month && i.period===per);
     const income=incs.reduce((s,i)=>s+Number(i.amount||0),0);
-    const planned=exps.filter(e=>e.status==='planned'), paid=exps.filter(e=>e.status==='paid');
+    const planned=exps.filter(e=>e.status==='planned').concat(loanBudgetLines(per));
+    const paid=exps.filter(e=>e.status==='paid');
     const sumPlanned=planned.reduce((s,e)=>s+Number(e.amount||0),0);
     const sumPaid=paid.reduce((s,e)=>s+Number(e.amount||0),0);
     return {income,incs,planned,paid,sumPlanned,sumPaid,remaining:income-sumPaid-sumPlanned};
@@ -1099,10 +1112,14 @@ const App = (() => {
         const csum=byCat[cat].reduce((s,e)=>s+Number(e.amount||0),0);
         inner+=`<div class="colcard"><h4>${esc(cat)} <span class="sum">${money(csum)}</span></h4>`;
         byCat[cat].forEach(e=>{
+          if(e.virtual){
+            inner+=`<div class="exp"><span class="nm">${esc(e.name)} <span class="muted" style="font-size:11px">↳ loan</span></span><span class="amt">${money(e.amount)}</span></div>`;
+          } else {
           inner+=`<div class="exp"><span class="nm">${esc(e.name)}${e.is_recurring?' ↻':''}</span><span class="amt">${money(e.amount)}</span>
             <button class="icon-btn" title="Edit" onclick="App.editExpenseForm('${e.id}')">✏️</button>
             <button class="icon-btn" title="${status==='planned'?'Mark paid':'Mark planned'}" onclick="App.toggleExp('${e.id}')">${status==='planned'?'✓':'↩'}</button>
             <button class="icon-btn del" onclick="App.delExp('${e.id}')">✕</button></div>`;
+          }
         });
         inner+='</div>';
       });
@@ -1322,23 +1339,10 @@ const App = (() => {
   }
   // Mirror every loan payment into the budget tracker as a "Loans" expense in its pay period
   async function reconcileLoanBudget(){
-    const want={};
-    data.loans.forEach(loan=>{
-      ((S.loanPayments&&S.loanPayments[loan.id])||[]).forEach(p=>{
-        const ym=p.date.slice(0,7); const day=Number(p.date.slice(8,10));
-        const period = day <= (S.payMid||15) ? 'mid' : 'end';
-        want['loan:'+p.id]={month:ym, period, name:loan.name, amount:Number(p.amount)||0};
-      });
-    });
-    const existing=data.expenses.filter(e=>e.source==='loan');
-    const bySrc={}; existing.forEach(e=>bySrc[e.source_id]=e);
-    for(const src in want){
-      const w=want[src], ex=bySrc[src];
-      if(ex){ if(Number(ex.amount)!==w.amount||ex.month!==w.month||ex.period!==w.period||ex.name!==w.name)
-        await upd('budget_expenses',ex.id,{amount:w.amount,month:w.month,period:w.period,name:w.name,category:'Loans'},data.expenses); }
-      else await ins('budget_expenses',{month:w.month,period:w.period,category:'Loans',name:w.name,amount:w.amount,status:'planned',source:'loan',source_id:src,is_recurring:false},data.expenses);
-    }
-    for(const e of existing){ if(!want[e.source_id]) await del('budget_expenses',e.id,data.expenses); }
+    // Loan payments now show as live virtual lines in the budget, so remove any
+    // old DB-synced loan expenses to avoid double-counting.
+    const stale=data.expenses.filter(e=>e.source==='loan');
+    for(const e of stale){ await del('budget_expenses',e.id,data.expenses); }
   }
 
   function loansContentHTML(){
@@ -1544,7 +1548,7 @@ const App = (() => {
     html += acc('home','Add to Home Screen','',`<p class="muted" style="font-size:13px">In Safari: tap <b>Share</b> → <b>Add to Home Screen</b>. LifeHub then opens full-screen like an app.</p>`);
     html += acc('account','Account','',`<p class="muted" style="font-size:13px;margin-bottom:4px">Signed in as <b style="color:var(--ink)">${esc(authEmail||'')}</b></p>
       <p class="muted" style="font-size:11px;word-break:break-all;margin-bottom:4px">Account ID: ${esc(uid||'')}</p>
-      <p class="muted" style="font-size:11px;margin-bottom:12px">Build <b style="color:var(--accent)">v11</b> · loan-budget sync</p>
+      <p class="muted" style="font-size:11px;margin-bottom:12px">Build <b style="color:var(--accent)">v12</b> · loans show in planned</p>
       <button class="btn line" style="width:100%;justify-content:center" onclick="App.doLogout()">Log out</button>`);
     $('#settingsBody').innerHTML=html;
   }
