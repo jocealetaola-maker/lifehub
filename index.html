@@ -305,7 +305,7 @@ const App = (() => {
     theme:'plain',
     accent:'#7c746a', bg:'#faf7f2', font:'Manrope', currency:'₱',
     payMid:15, payEnd:30, savingsPct:20,
-    debtMonthly:0, loanApr:{}, loanOverdue:{}, loanDues:{}, loanPayments:{}, loanHorizon:6,
+    debtMonthly:0, loanApr:{}, loanOverdue:{}, loanDues:{}, loanPayments:{}, loanEnd:{}, loanHorizon:6,
     stores:[], priceBook:{}, groceryLimit:0, shopStore:'', hiddenPeriods:{},
     cat_shopping:['Groceries','House things','Personal care','Pharmacy','Other'],
     cat_budget:['Bills','Food','Transport','Subscriptions','Health','Misc']
@@ -971,6 +971,7 @@ const App = (() => {
         <span class="amt" style="color:var(--good)">${money(i.amount)}</span>
         <button class="icon-btn" onclick="App.editIncomeForm('${i.id}')">✏️</button><button class="icon-btn del" onclick="App.delIncomeLine('${i.id}')">✕</button></div>`).join('');
     if(!st.incs.length) incRows = `<p class="muted" style="font-size:13px;padding:4px 2px">No income yet for this period.</p>`;
+    const totalExp = st.sumPlanned + st.sumPaid;
     return `<div class="group-title" style="font-size:16px;color:var(--ink);margin-top:2px">
           ${per==='mid'?'☀️ 15th · Mid-month':'🌙 30th · End-month'} <span class="count">${money(st.income)} in</span></div>
         <div class="card">
@@ -978,10 +979,12 @@ const App = (() => {
             <button class="btn ghost tiny" onclick="App.incomeAddForm('${per}')">+ Add income</button></div>
           ${incRows}
         </div>
+        <div class="summary" style="margin-top:12px">
+          <div class="stat ${st.remaining<0?'bad':'good'}"><div class="k">Left this period</div><div class="v">${money(st.remaining)}</div></div>
+          <div class="stat"><div class="k">Total expenses</div><div class="v">${money(totalExp)}</div></div>
+        </div>
         ${groupBlock('Planned', st.planned, 'planned')}
         ${groupBlock('Paid', st.paid, 'paid')}
-        <div class="summary" style="margin-top:10px"><div class="stat big ${st.remaining<0?'bad':'good'}">
-          <div class="k">Left this period</div><div class="v">${money(st.remaining)}</div></div></div>
         ${loanPaydaySection(dateStr)}`;
   }
   function loanPaydaySection(dateStr){
@@ -1310,9 +1313,11 @@ const App = (() => {
   function dueDateStr(ym, day){ const d=Math.min(Number(day)||1, daysInMonth(ym)); return ym+'-'+String(d).padStart(2,'0'); }
   function monthsBetween(a,b){ const out=[]; let [y,m]=a.split('-').map(Number); const [ey,em]=b.split('-').map(Number); let g=0; while((y<ey||(y===ey&&m<=em)) && g<240){ out.push(y+'-'+String(m).padStart(2,'0')); m++; if(m>12){m=1;y++;} g++; } return out; }
   function loanFloor(loan){ return (loan.created_at? String(loan.created_at).slice(0,10) : (month+'-01')); }
+  function loanEndDate(loan){ return (S.loanEnd&&S.loanEnd[loan.id])||null; }
   function loanDueList(loan){ return (S.loanDues&&S.loanDues[loan.id])||[]; }
   function loanPayList(loan){ return ((S.loanPayments&&S.loanPayments[loan.id])||[]).slice().sort((a,b)=>a.date<b.date?-1:1); }
   function loanDueOccurrences(loan, through){
+    const end=loanEndDate(loan); if(end && end<through) through=end;   // stop dues after the loan ends
     const floor=loanFloor(loan), startYM=floor.slice(0,7), endYM=through.slice(0,7);
     const dues=loanDueList(loan), out=[];
     monthsBetween(startYM,endYM).forEach(ym=>dues.forEach(d=>{ const ds=dueDateStr(ym,d.day); if(ds>=floor && ds<=through) out.push({date:ds, amount:Number(d.amount)||0}); }));
@@ -1385,7 +1390,7 @@ const App = (() => {
       <div class="card" style="background:var(--accent-soft);border:1px solid var(--accent);margin-bottom:14px">
         <div class="row"><h3 style="font-size:19px;color:var(--ink)">${esc(loan.name)}</h3><div class="spacer"></div>
           <b>${pos.owed>0?money(pos.owed)+' left':pos.owed<0?'Credit '+money(-pos.owed):'Cleared'}</b></div>
-        <div class="muted" style="font-size:12px;margin-top:4px">Starting balance ${money(loan.balance)} · Paid so far ${money(pos.paid)}</div>
+        <div class="muted" style="font-size:12px;margin-top:4px">Starting balance ${money(loan.balance)} · Paid so far ${money(pos.paid)}${loanEndDate(loan)?" · ends "+fmtDay(loanEndDate(loan)):""}</div>
       </div>
       <div class="group-title">Due dates <span class="count">${dues.length}/3</span></div><div class="card">`;
     if(!dues.length) html+=`<p class="muted" style="font-size:13px">No due dates yet — add when a charge lands and how much.</p>`;
@@ -1419,6 +1424,7 @@ const App = (() => {
       <div class="field two"><div><label>First due day (1-31)</label><input id="l_day" type="number" inputmode="numeric" placeholder="e.g. 27" /></div>
         <div><label>Due amount (₱)</label><input id="l_amt" type="number" inputmode="decimal" placeholder="0" /></div></div>
       <p class="muted" style="font-size:12px">You can add up to 3 due dates per loan later in its ledger.</p>
+      <div class="field"><label>End date (optional — when the loan finishes)</label><input id="l_end" type="date" /></div>
       <div class="field"><label>Notes</label><input id="l_notes" placeholder="optional" /></div>
       <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.addLoan()">Add</button></div>`);
     setTimeout(()=>$('#l_name').focus(),100);
@@ -1429,7 +1435,9 @@ const App = (() => {
     const day=parseInt($('#l_day').value)||0, amt=parseFloat($('#l_amt').value)||0;
     const loan=await ins('loans',{name,balance:bal,installment:0,notes:$('#l_notes').value.trim()},data.loans);
     if(!loan)return;
-    if(day>=1 && day<=31){ S.loanDues={...(S.loanDues||{})}; S.loanDues[loan.id]=[{day, amount:amt}]; await saveSettings(); }
+    if(day>=1 && day<=31){ S.loanDues={...(S.loanDues||{})}; S.loanDues[loan.id]=[{day, amount:amt}]; }
+    const end=$('#l_end').value; if(end){ S.loanEnd={...(S.loanEnd||{})}; S.loanEnd[loan.id]=end; }
+    await saveSettings();
     closeSheet(); renderBudget();
   }
   function dueForm(loanId, idx){
@@ -1470,15 +1478,19 @@ const App = (() => {
   }
   function editLoanSettingsForm(loanId){
     const loan=data.loans.find(l=>l.id===loanId);
+    const end=(S.loanEnd&&S.loanEnd[loanId])||'';
     openSheet(`<h3>Edit loan baseline</h3>
       <div class="field"><label>Name</label><input id="e_loan_name" value="${esc(loan.name)}" /></div>
       <div class="field"><label>Current balance owed (₱)</label><input id="e_loan_bal" type="number" inputmode="decimal" value="${loan.balance}" /></div>
+      <div class="field"><label>End date (optional — leave blank for ongoing)</label><input id="e_loan_end" type="date" value="${end}" /></div>
       <div class="field"><label>Notes</label><input id="e_loan_notes" value="${esc(loan.notes||'')}" /></div>
       <div class="sheet-acts"><button class="btn line" onclick="App.closeSheet()">Cancel</button><button class="btn" onclick="App.saveLoanSettings('${loanId}')">Save</button></div>`);
   }
   async function saveLoanSettings(loanId){
     const name=$('#e_loan_name').value.trim(); if(!name){toast('Name needed');return;}
     await upd('loans', loanId, {name, balance:parseFloat($('#e_loan_bal').value)||0, notes:$('#e_loan_notes').value.trim()}, data.loans);
+    const end=$('#e_loan_end').value; S.loanEnd={...(S.loanEnd||{})}; if(end) S.loanEnd[loanId]=end; else delete S.loanEnd[loanId];
+    await saveSettings();
     closeSheet(); renderBudget(); toast('Saved');
   }
   async function delLoan(id){
@@ -1488,6 +1500,7 @@ const App = (() => {
       data.loans=data.loans.filter(l=>l.id!==id);
       if(S.loanDues) delete S.loanDues[id];
       if(S.loanPayments) delete S.loanPayments[id];
+      if(S.loanEnd) delete S.loanEnd[id];
       await saveSettings(); renderBudget(); toast('Loan removed');
     }catch(e){ console.error(e); toast('Delete failed'); }
   }
@@ -1552,7 +1565,7 @@ const App = (() => {
     html += acc('home','Add to Home Screen','',`<p class="muted" style="font-size:13px">In Safari: tap <b>Share</b> → <b>Add to Home Screen</b>. LifeHub then opens full-screen like an app.</p>`);
     html += acc('account','Account','',`<p class="muted" style="font-size:13px;margin-bottom:4px">Signed in as <b style="color:var(--ink)">${esc(authEmail||'')}</b></p>
       <p class="muted" style="font-size:11px;word-break:break-all;margin-bottom:4px">Account ID: ${esc(uid||'')}</p>
-      <p class="muted" style="font-size:11px;margin-bottom:12px">Build <b style="color:var(--accent)">v13</b> · loans in planned</p>
+      <p class="muted" style="font-size:11px;margin-bottom:12px">Build <b style="color:var(--accent)">v15</b> · summary on top</p>
       <button class="btn line" style="width:100%;justify-content:center" onclick="App.doLogout()">Log out</button>`);
     $('#settingsBody').innerHTML=html;
   }
